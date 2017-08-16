@@ -7,11 +7,15 @@ import java.util.stream.Collectors;
  * Move towards a Snaffle and use your team id to determine where you need to throw it.
  **/
 class Player {
-    static long turnStartTime;
+    static Map<Integer, Wizard> wizards = new HashMap<>();
+    static Map<Integer, Thing> opWizards = new HashMap<>();
+    static Map<Integer, Snaffle> snaffles = new HashMap<>();
+    static Map<Integer, Thing> bludgers = new HashMap<>();
+
+    static List<Integer> updatedSnaffles = null;
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
-
         Global.myTeamId = in.nextInt(); // if 0 you need to score on the right of the map, if 1 you need to score on the left
         System.err.println("myteamId is :" + Global.myTeamId);
 
@@ -22,46 +26,42 @@ class Player {
 
         // game loop
         while (true) {
-            turnStartTime = System.currentTimeMillis();
+            updatedSnaffles = new ArrayList<>();
 
             int myScore = in.nextInt();
             int myMagic = in.nextInt();
-            int opScore = in.nextInt();
-            int opMagic = in.nextInt();
+            int opponentScore = in.nextInt();
+            int opponentMagic = in.nextInt();
             int entities = in.nextInt(); // number of entities still in game
-
-            Map<Integer, Wizard> wizards = new HashMap<>();
-            Map<Integer, Thing> opWizards = new HashMap<>();
-            Map<Integer, Snaffle> snaffles = new HashMap<>();
-            Map<Integer, Thing> bludgers = new HashMap<>();
-
             for (int i = 0; i < entities; i++) {
-                int entityId = in.nextInt();    // entity identifier
-                String entityType = in.next();  // "WIZARD", "OPPONENT_WIZARD" or "SNAFFLE" (or "BLUDGER" after first league)
-                int x = in.nextInt();   // position
-                int y = in.nextInt();   // position
-                int vx = in.nextInt();  // velocity
-                int vy = in.nextInt();  // velocity
-                int state = in.nextInt();   // 1 if the wizard is holding a Snaffle, 0 otherwise
+                int entityId = in.nextInt(); // entity identifier
+                String entityType = in.next(); // "WIZARD", "OPPONENT_WIZARD" or "SNAFFLE" (or "BLUDGER" after first league)
+                int x = in.nextInt(); // position
+                int y = in.nextInt(); // position
+                int vx = in.nextInt(); // velocity
+                int vy = in.nextInt(); // velocity
+                int state = in.nextInt(); // 1 if the wizard is holding a Snaffle, 0 otherwise
                 Thing t = new Thing(x, y, vx, vy, state, entityId, entityType);
-                switch (entityType) {
-                    case "WIZARD":
-                        wizards.put(t.entityId, new Wizard(t));
-                        break;
-                    case "OPPONENT_WIZARD":
-                        opWizards.put(t.entityId, new Wizard(t));
-                        break;
-                    case "SNAFFLE":
-                        snaffles.put(t.entityId, new Snaffle(t));
-                        break;
-                    case "BLUDGER":
-                        bludgers.put(t.entityId, t);
-                        break;
-                    default:
+                //System.err.println(t.toString());
+                if (Global.turnCount == 0) {
+                    init(entityType, t);
+                } else {
+                    update(entityType, t);
                 }
             }
 
-            List<String> res = solve(turnStartTime, new State(wizards, opWizards, snaffles, bludgers, myScore, myMagic, opScore, opMagic), 90);
+            Util.removeNeedlessSnaffles(updatedSnaffles, snaffles);
+
+            //showWizards();
+//            System.err.println("show snaffles");
+//            showSnaffles();
+
+            List<String> res = new ArrayList<>();
+            int prevTarget = -1;
+            for (Map.Entry<Integer, Wizard> w : wizards.entrySet()) {
+                res.add(w.getValue().generateCommand(wizards, opWizards, snaffles, bludgers, prevTarget));
+                prevTarget = w.getValue().targetId;
+            }
 
             for (int i = 0; i < 2; i++) {
                 System.out.println(res.get(i));
@@ -70,96 +70,72 @@ class Player {
         }
     }
 
-    static List<String> solve(long startTime, State startState, long duration) {
-        long currentTime = System.currentTimeMillis();
-
-        Deque<State> queue = new ArrayDeque<>();
-        //queue.push(new State(startState));
-        while (!queue.isEmpty() && currentTime < startTime + duration) {  //何を答えとするか？ => 読める中で一番良い盤面になる状態に繊維する
-
-            currentTime = System.currentTimeMillis();
+    public static void init(String entityType, Thing t) {
+        switch (entityType) {
+            case "WIZARD":
+                wizards.put(t.entityId, new Wizard(t));
+                break;
+            case "OPPONENT_WIZARD":
+                opWizards.put(t.entityId, t);
+                break;
+            case "SNAFFLE":
+                snaffles.put(t.entityId, new Snaffle(t));
+                updatedSnaffles.add(t.entityId);
+                break;
+            case "BLUDGER":
+                bludgers.put(t.entityId, t);
+                break;
+            default:
         }
-        return null;
     }
 
+    public static void update(String entityType, Thing t) {
+        switch (entityType) {
+            case "WIZARD":
+                Wizard w = wizards.get(t.entityId);
+                w.update(t);
+                break;
+            case "OPPONENT_WIZARD": {
+                Thing tmp = opWizards.get(t.entityId);
+                tmp.update(t);
+                opWizards.put(tmp.entityId, tmp);
+                break;
+            }
+            case "SNAFFLE": {
+                Snaffle tmp = snaffles.get(t.entityId);
+                if (tmp != null) {
 
-}
+                    updatedSnaffles.add(tmp.entityId);
 
-class State implements Cloneable {
-    private Map<Integer, Wizard> wizards;
-    private Map<Integer, Thing> opWizards;
-    private Map<Integer, Snaffle> snaffles;
-    private Map<Integer, Thing> bludgers;
-    private int myScore;
-    private int myMagic;
-    private int opScore;
-    private int opMagic;
-    private List<String> firstCommand;
-
-    public State(Map<Integer, Wizard> wizards,
-                 Map<Integer, Thing> opWizards,
-                 Map<Integer, Snaffle> snaffles,
-                 Map<Integer, Thing> bludgers,
-                 int myScore, int myMagic, int opScore, int opMagic) {
-        this.wizards = new HashMap<>(wizards);
-        this.opWizards = new HashMap<>(opWizards);
-        this.snaffles = new HashMap<>(snaffles);
-        this.bludgers = new HashMap<>(bludgers);
-        this.myScore = myScore;
-        this.myMagic = myMagic;
-        this.opScore = opScore;
-        this.opMagic = opMagic;
-        //this.firstCommand = new ArrayList<>();
+                    tmp.update(t);
+                    snaffles.put(tmp.entityId, tmp);
+                }
+                break;
+            }
+            case "BLUDGER": {
+                Thing tmp = bludgers.get(t.entityId);
+                tmp.update(t);
+                bludgers.put(tmp.entityId, tmp);
+                break;
+            }
+            default:
+        }
     }
 
-    void showWizards() {
+    static void showWizards() {
         for (Map.Entry<Integer, Wizard> w : wizards.entrySet()) {
             System.err.println(w.toString());
         }
     }
 
-    void showSnaffles() {
+    static void showSnaffles() {
         for (Map.Entry<Integer, Snaffle> s : snaffles.entrySet()) {
             System.err.println(s.toString());
         }
     }
 
-    int evaluate() {
-        return (myScore - opScore) * AIParams.EVAL_SCORE;
-    }
 
-    @Override
-    protected State clone(){
-        State tmp= null;
-        try {
-            tmp = (State) super.clone(); //shallow copyなのでObject型のコピーは書く必要がある
-        } catch (CloneNotSupportedException e){
-            System.out.println(e.getMessage());
-            throw new RuntimeException(e);
-        }
-//        tmp.wizards = new HashMap<>(this.wizards);
-//        tmp.opWizards = new HashMap<>(this.opWizards);
-//        tmp.snaffles = new HashMap<>(this.snaffles);
-//        tmp.bludgers = new HashMap<>(this.bludgers);
-        return tmp;
-    }
-
-    @Override
-    public String toString() {
-        return "State{" +
-                "wizards=" + wizards.toString() +
-                ", opWizards=" + opWizards.toString() +
-                ", snaffles=" + snaffles.toString() +
-                ", bludgers=" + bludgers.toString() +
-                ", myScore=" + myScore +
-                ", myMagic=" + myMagic +
-                ", opScore=" + opScore +
-                ", opMagic=" + opMagic +
-                ", firstCommand=" + firstCommand +
-                '}';
-    }
 }
-
 
 class Wizard extends Thing {
 
@@ -171,6 +147,7 @@ class Wizard extends Thing {
     String message = "";
     //boolean grabbing
 
+
     int runPower = 150;
     int throwPower = 500;
 
@@ -181,15 +158,44 @@ class Wizard extends Thing {
         super(t.x, t.y, t.vx, t.vy, t.state, t.entityId, t.entityType);
     }
 
+    String generateCommand(Map<Integer, Wizard> wizards, Map<Integer, Thing> opWizards, Map<Integer, Snaffle> snaffles, Map<Integer, Thing> bludgers, int without) {
+        this.message = "";
+
+        String res;
+
+        if (this.state == 0) {//持ってない
+            if (willPetrificus(snaffles, opWizards)) {
+                Global.usedSpellCost += Global.cPetrificus;
+                res = "PETRIFICUS " + this.targetId;
+                Global.castHistory.put(this.targetId, Global.turnCount);
+            } else if (willFlipend(snaffles, Util.margeThings(wizards, opWizards, snaffles, bludgers))) {
+                Global.usedSpellCost += Global.cFlipend;
+                res = "FLIPENDO " + this.targetId;
+            } else if (willAccio(wizards, snaffles, opWizards)) {
+                Global.usedSpellCost += Global.cAccio;
+                res = "ACCIO " + this.targetId;
+            } else {
+                res = move(snaffles, opWizards, without);
+            }
+
+        } else {//持ってる
+            res = throwSnaffle(opWizards, bludgers);
+
+        }
+        if (!this.message.equals(""))
+            res += " " + this.message;
+        //res += " hello";
+        return res;
+    }
 
     private String throwSnaffle(Map<Integer, Thing> opWizards, Map<Integer, Thing> bludgers) {
         //果たして下だけの場合に比べてthrowは良くなるのか！？
 
-        if (Util.dist2EnemyGoal(this) <= 8000 || Util.getMinDist2Enemies(this, opWizards) >= 5000) {
+        if(Util.dist2EnemyGoal(this)<=8000 || Util.getMinDist2Enemies(this,opWizards)>=5000){
             if (Global.myTeamId == 0) {
                 return "THROW 16000 3750 500";
             } else {
-                return "THROW 0 3750 500";
+                return  "THROW 0 3750 500";
             }
         }
 
@@ -229,9 +235,9 @@ class Wizard extends Thing {
 
             long x2 = t.x + Util.round(x);//目標地点
             long y2 = t.y + Util.round(y);
-            System.err.println("tar:" + x2 + "," + y2);
+            System.err.println("tar:"+x2+","+y2);
 
-            if (!Util.isIn(x2, y2))
+            if(!Util.isIn(x2,y2))
                 continue;
 
             double minDist = Double.MAX_VALUE;
@@ -262,10 +268,10 @@ class Wizard extends Thing {
     }
 
     String move(Map<Integer, Snaffle> snaffles, Map<Integer, Thing> opWizards, int without) {
-        Thing t = Util.getClosest(this, snaffles, without);
+        Thing t = Util.getNearest(this, snaffles, without);
 
         if (t == null) {
-            t = Util.getClosest(this, snaffles, -1);
+            t = Util.getNearest(this, snaffles, -1);
         }
 
         if (t != null) {
@@ -283,6 +289,7 @@ class Wizard extends Thing {
     boolean willPetrificus(Map<Integer, Snaffle> snaffles, Map<Integer, Thing> opWizards) {
         if (!isCastable(Global.cPetrificus))
             return false;
+
 
 
         for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
@@ -318,17 +325,17 @@ class Wizard extends Thing {
 
         for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
             //snaffleが自陣側ゴールに近くて、引き寄せられる範囲なら
-            boolean f1 = Util.distMyGoal(e.getValue()) <= AIParams.ACCIO_FIELD;
-            System.err.println("ac_near:" + f1);
-            boolean f2 = Util.getDistance(this, e.getValue()) <= AIParams.ACCIO_DIST;
-            System.err.println("ac_dist:" + f2);
-            if (f1 && f2) {
+            boolean f1=Util.distMyGoal(e.getValue()) <= AIParams.ACCIO_FIELD;
+            System.err.println("ac_near:"+f1);
+            boolean f2=Util.getDistance(this, e.getValue()) <= AIParams.ACCIO_DIST;
+            System.err.println("ac_dist:"+f2);
+            if ( f1&& f2) {
 
                 //近くに相手がいれば
                 for (Map.Entry<Integer, Thing> opW : opWizards.entrySet()) {
                     if (Util.getDistance(e.getValue(), opW.getValue()) <= AIParams.ACCIO_SURROUNDIST) {
-                        boolean enemyNear = enemyNear(wizards, opWizards, e.getValue());
-                        System.err.println("enear:" + enemyNear);
+                        boolean enemyNear=enemyNear(wizards, opWizards, e.getValue());
+                        System.err.println("enear:"+enemyNear);
                         if (enemyNear) {
                             this.targetId = e.getValue().entityId;
                             return true;
@@ -457,7 +464,7 @@ class Wizard extends Thing {
         return res;
     }
 
-    //コストと状況からうつべきかどうか判断
+    /* //コストと状況からうつべきかどうか判断
 
     boolean willFlipend(List<Thing> list) {
         if (!isCastable(20))
@@ -494,8 +501,8 @@ class Wizard extends Thing {
         for (Integer tmpY : goalY) {
             for (Thing t : objects) {
                 double d = Util.getDistObj2line(this.x, this.y, goalX, tmpY, t.x, t.y);
-                if (d > (t.r + Global.SNAF_R + SHOOT_WIDTH) && d > maxDist) { //打つのに十分な幅があり、今までの
-                    flipend = true;
+                if (d > (t.r+Global.SNAF_R+SHOOT_WIDTH) && d > maxDist) { //打つのに十分な幅があり、今までの
+                    flipend=true;
                     this.commandX = t.x;
                     this.commandY = t.y;
 
@@ -503,7 +510,7 @@ class Wizard extends Thing {
             }
         }
         return flipend;
-    }
+    }*/
 
     //自分よりゴール側にあるsniffleを打ってみる
     boolean isShootable(Thing t) {
@@ -564,10 +571,6 @@ class Wizard extends Thing {
 
 }
 
-class OpWizard extends Thing {
-
-}
-
 class Snaffle extends Thing {
     public Snaffle() {
     }
@@ -582,120 +585,9 @@ class Snaffle extends Thing {
     }
 }
 
-class Thing {
-    public Thing() {
-    }
-
-    public Thing(int x, int y, int vx, int vy, int state, int entityId, String entityType) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.state = state;
-        this.entityId = entityId;
-        this.entityType = entityType;
-        switch (this.entityType) {
-            case "WIZARD":
-                this.r = 400;
-                break;
-            case "OPPONENT_WIZARD":
-                this.r = 400;
-                break;
-            case "SNAFFLE":
-                this.r = 150;
-                break;
-            case "BLUDGER":
-                this.r = 200;
-                break;
-            default:
-        }
-    }
-
-    public Thing getMoved() {
-        Thing t = new Thing();
-        t.x = this.x + this.vx;
-        t.y = this.y + this.vy;
-        t.vx = (int) Util.round(this.vx * Util.getFriction(this.entityType));
-        t.vy = (int) Util.round(this.vy * Util.getFriction(this.entityType));
-        t.state = this.state; //ホントは違う
-        t.entityId = this.entityId;
-        t.entityType = this.entityType;
-        t.r = this.r;
-        //System.err.println("moved x,y,id:"+t.x+" "+t.y+" "+t.entityId);
-        return t;
-    }
-
-    public void update(Thing t) {
-        this.x = t.x;
-        this.y = t.y;
-        this.vx = t.vx;
-        this.vy = t.vy;
-        this.state = t.state;
-        this.entityId = t.entityId;
-    }
-
-    int x;
-    int y;
-    int vx;
-    int vy;
-    int state;
-    int entityId;
-    String entityType;
-    int r;
-
-    @Override
-    public String toString() {
-        return "Thing{" +
-                "x=" + x +
-                ", y=" + y +
-                ", vx=" + vx +
-                ", vy=" + vy +
-                ", state=" + state +
-                ", entityId=" + entityId +
-                ", entityType='" + entityType + '\'' +
-                '}';
-    }
-}
-
-class Global {
-    static int turnCount = 0;
-    static int usedSpellCost = 0;
-    static int myTeamId = 0;
-    static int divideGoalNum = 100;
-
-    static double WIZ_FRICTION = 0.75;
-    static double SNAF_FRICTION = 0.75;
-    static double BLUD_FRICTION = 0.9;
-
-    static int targetGoalX;
-    static int targetGoalY;
-
-    static int myGoalX;
-    static int myGoalY;
-
-    static int cFlipend = 20;
-    static int cAccio = 20;
-    static int cPetrificus = 10;
-    static int obliviate = 5;
-
-    static int pollLower = 2050;
-    static int pollUpper = 5450;
-    static int pollDiff = (pollUpper - pollLower) / divideGoalNum;
-
-    static int buffer = 300;
-    static int shootLower = pollLower + buffer;
-    static int shootUpper = pollUpper - buffer;
-
-    static int SNAF_R = 150;
-    static int WIZ_R = 400;
-    static int OPWIZ_R = 400;
-    static int BLUD_R = 200;
-
-    static Map<Integer, Integer> castHistory = new HashMap<>();
-}
-
 class Util {
-    //-----幾何関係-----
+    //-------------幾何関係
+
     //AB to CD が交差してるか返す
     //http://qiita.com/ykob/items/ab7f30c43a0ed52d16f2
     static boolean isIntersect(long ax, long ay, long bx, long by, long cx, long cy, long dx, long dy) {
@@ -774,7 +666,7 @@ class Util {
     }
 
     // -1 if there is no without
-    static Thing getClosest(Thing from, Map<Integer, Snaffle> map, int without) {
+    static Thing getNearest(Thing from, Map<Integer, Snaffle> map, int without) {
         long minDist = Long.MAX_VALUE;
         Thing minThing = null;
         for (Map.Entry<Integer, Snaffle> e : map.entrySet()) {
@@ -790,8 +682,8 @@ class Util {
         return minThing;
     }
 
-    static Thing getClosest(Thing from, Map<Integer, Snaffle> list) {
-        return getClosest(from, list, -1);
+    static Thing getNearest(Thing from, Map<Integer, Snaffle> list) {
+        return getNearest(from, list, -1);
     }
 
     //-------------その他
@@ -802,11 +694,17 @@ class Util {
 
     static List<Thing> margeThings(Map<Integer, Wizard> wizards, Map<Integer, Thing> opWizards, Map<Integer, Snaffle> snaffles, Map<Integer, Thing> bludgers) {
         List<Thing> res = new ArrayList<>();
+        /*if(wizards!=null){
+            for (Map.Entry<Integer,Wizard> e:wizards.entrySet()){
+                res.add(e.getValue());
+            }
+        }*/
         if (opWizards != null) {
             for (Map.Entry<Integer, Thing> e : opWizards.entrySet()) {
                 res.add(e.getValue());
             }
         }
+
         if (snaffles != null) {
             for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
                 res.add(e.getValue());
@@ -869,13 +767,12 @@ class Util {
     public static boolean isIn(long x, long y) {
         return (0 < x && x < 16000 && 0 < y && y < 7500);
     }
-
-    public static long getMinDist2Enemies(Thing t, Map<Integer, Thing> opWizards) {
-        long minDist = Long.MAX_VALUE;
-        for (Map.Entry<Integer, Thing> e : opWizards.entrySet()) {
-            long d = getDistance(t, e.getValue());
-            if (minDist > d) {
-                minDist = d;
+    public static long getMinDist2Enemies(Thing t,Map<Integer,Thing> opWizards){
+        long minDist=Long.MAX_VALUE;
+        for(Map.Entry<Integer,Thing> e:opWizards.entrySet()){
+            long d=getDistance(t,e.getValue());
+            if(minDist>d){
+                minDist=d;
             }
         }
         return minDist;
@@ -884,36 +781,119 @@ class Util {
     /*public static boolean inEmargency(Snaffle s){
         return Util.distMyGoal(s)
     }*/
+}
 
-    /*String generateCommand(Map<Integer, Wizard> wizards, Map<Integer, Thing> opWizards, Map<Integer, Snaffle> snaffles, Map<Integer, Thing> bludgers, int without) {
-        this.message = "";
 
-        String res;
+class Thing {
+    public Thing() {
+    }
 
-        if (this.state == 0) {//持ってない
-            if (willPetrificus(snaffles, opWizards)) {
-                Global.usedSpellCost += Global.cPetrificus;
-                res = "PETRIFICUS " + this.targetId;
-                Global.castHistory.put(this.targetId, Global.turnCount);
-            } else if (willFlipend(snaffles, Util.margeThings(wizards, opWizards, snaffles, bludgers))) {
-                Global.usedSpellCost += Global.cFlipend;
-                res = "FLIPENDO " + this.targetId;
-            } else if (willAccio(wizards, snaffles, opWizards)) {
-                Global.usedSpellCost += Global.cAccio;
-                res = "ACCIO " + this.targetId;
-            } else {
-                res = move(snaffles, opWizards, without);
-            }
-
-        } else {//持ってる
-            res = throwSnaffle(opWizards, bludgers);
-
+    public Thing(int x, int y, int vx, int vy, int state, int entityId, String entityType) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.state = state;
+        this.entityId = entityId;
+        this.entityType = entityType;
+        switch (this.entityType) {
+            case "WIZARD":
+                this.r = 400;
+                break;
+            case "OPPONENT_WIZARD":
+                this.r = 400;
+                break;
+            case "SNAFFLE":
+                this.r = 150;
+                break;
+            case "BLUDGER":
+                this.r = 200;
+                break;
+            default:
         }
-        if (!this.message.equals(""))
-            res += " " + this.message;
-        //res += " hello";
-        return res;
-    }*/
+    }
+
+    public Thing getMoved() {
+        Thing t = new Thing();
+        t.x = this.x + this.vx;
+        t.y = this.y + this.vy;
+        t.vx = (int)Util.round(this.vx * Util.getFriction(this.entityType));
+        t.vy = (int)Util.round(this.vy * Util.getFriction(this.entityType));
+        t.state = this.state; //ホントは違う
+        t.entityId = this.entityId;
+        t.entityType = this.entityType;
+        t.r = this.r;
+        //System.err.println("moved x,y,id:"+t.x+" "+t.y+" "+t.entityId);
+        return t;
+    }
+
+    public void update(Thing t) {
+        this.x = t.x;
+        this.y = t.y;
+        this.vx = t.vx;
+        this.vy = t.vy;
+        this.state = t.state;
+        this.entityId = t.entityId;
+    }
+
+    @Override
+    public String toString() {
+        return "Thing{" +
+                "x=" + x +
+                ", y=" + y +
+                ", vx=" + vx +
+                ", vy=" + vy +
+                ", state=" + state +
+                ", entityId=" + entityId +
+                ", entityType='" + entityType + '\'' +
+                '}';
+    }
+
+    int x;
+    int y;
+    int vx;
+    int vy;
+    int state;
+    int entityId;
+    String entityType;
+    int r;
+}
+
+class Global {
+    static int turnCount = 0;
+    static int usedSpellCost = 0;
+    static int myTeamId = 0;
+    static int divideGoalNum = 100;
+
+    static double WIZ_FRICTION = 0.75;
+    static double SNAF_FRICTION = 0.75;
+    static double BLUD_FRICTION = 0.9;
+
+    static int targetGoalX;
+    static int targetGoalY;
+
+    static int myGoalX;
+    static int myGoalY;
+
+    static int cFlipend = 20;
+    static int cAccio = 20;
+    static int cPetrificus = 10;
+    static int obliviate = 5;
+
+    static int pollLower = 2050;
+    static int pollUpper = 5450;
+    static int pollDiff = (pollUpper - pollLower) / divideGoalNum;
+
+    static int buffer = 300;
+    static int shootLower = pollLower + buffer;
+    static int shootUpper = pollUpper - buffer;
+
+    static int SNAF_R = 150;
+    static int WIZ_R = 400;
+    static int OPWIZ_R = 400;
+    static int BLUD_R = 200;
+
+    static Map<Integer, Integer> castHistory = new HashMap<>();
 }
 
 class AIParams {
@@ -930,8 +910,4 @@ class AIParams {
     static int FLIP_BUFF = 500;
 
     static int reCastPET = 3;
-
-    static int EVAL_SCORE = 100;
-    static int EVAL_COVER_FIELD = 5;
-    static int EVAL_COVER_DISTANCE = 3000;
 }
