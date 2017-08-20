@@ -1,5 +1,5 @@
 import java.util.*;
-import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 
 /**
@@ -30,10 +30,10 @@ class Player {
             int opMagic = in.nextInt();
             int entities = in.nextInt(); // number of entities still in game
 
-            Map<Integer, Wizard> wizards = new HashMap<>();
-            Map<Integer, Thing> opWizards = new HashMap<>();
-            Map<Integer, Snaffle> snaffles = new HashMap<>();
-            Map<Integer, Thing> bludgers = new HashMap<>();
+            ArrayList<Wizard> wizards = new ArrayList<>();
+            ArrayList<Thing> opWizards = new ArrayList<>();
+            ArrayList<Snaffle> snaffles = new ArrayList<>();
+            ArrayList<Thing> bludgers = new ArrayList<>();
 
             for (int i = 0; i < entities; i++) {
                 int entityId = in.nextInt();    // entity identifier
@@ -46,102 +46,483 @@ class Player {
                 Thing t = new Thing(x, y, vx, vy, state, entityId, entityType);
                 switch (entityType) {
                     case "WIZARD":
-                        wizards.put(t.entityId, new Wizard(t));
+                        wizards.add(new Wizard(t));
                         break;
                     case "OPPONENT_WIZARD":
-                        opWizards.put(t.entityId, new Wizard(t));
+                        opWizards.add(new Wizard(t));
                         break;
                     case "SNAFFLE":
-                        snaffles.put(t.entityId, new Snaffle(t));
+                        snaffles.add(new Snaffle(t));
                         break;
                     case "BLUDGER":
-                        bludgers.put(t.entityId, t);
+                        bludgers.add(t);
                         break;
                     default:
                 }
             }
 
-            List<String> res = solve(turnStartTime, new State(wizards, opWizards, snaffles, bludgers, myScore, myMagic, opScore, opMagic), 90);
+            List<String> res = solve(turnStartTime, new State(wizards, opWizards, snaffles, bludgers, myScore, myMagic, opScore, opMagic, Global.turnCount, 0));
 
             for (int i = 0; i < 2; i++) {
+                System.err.println(res.get(i));
                 System.out.println(res.get(i));
             }
             Global.turnCount++;
         }
     }
 
-    static List<String> solve(long startTime, State startState, long duration) {
+    static List<String> solve(long startTime, State startState) {
         long currentTime = System.currentTimeMillis();
+        startState.setScore();
+        State bestState = startState.clone();
 
-        Deque<State> queue = new ArrayDeque<>();
-        //queue.push(new State(startState));
-        while (!queue.isEmpty() && currentTime < startTime + duration) {  //何を答えとするか？ => 読める中で一番良い盤面になる状態に繊維する
+        TreeSet<State> beam1 = new TreeSet<>();
+        TreeSet<State> beam2 = new TreeSet<>();
+        beam1.add(startState.clone());
+        //System.err.println("beam1:" + beam1.first().toString());
+        int turnsSimulated = 0;
+        while (currentTime < (startTime + AIParams.SEARCH_DURATION)) {  //何を答えとするか？ => 読める中で一番良い盤面になる状態に繊維する
 
+            State now = beam1.pollFirst();
+
+            if (now == null) break;
+
+            bestState = updateQueue(now, bestState, beam2, currentTime, startTime + AIParams.SEARCH_DURATION);
+            //System.err.println("beam2Count:"+beam2.size());
+            if (beam1.isEmpty()) {
+                beam1 = beam2;
+                beam2 = new TreeSet<>();
+            }
+            turnsSimulated++;
             currentTime = System.currentTimeMillis();
         }
-        return null;
+
+        /*if(!beam2.isEmpty()) {
+            showScores(beam2, 30);
+        }else
+            showScores(beam1,30);*/
+        //assert !bestState.equals(startState);
+        System.err.println("simulated turn: " + turnsSimulated);
+        System.err.println("bestState: " + bestState.score + " " + bestState.firstCommand);
+        bestState.descScore();
+
+        if (bestState.firstCommand.get(0).equals("") || bestState.firstCommand.get(1).equals("")) {
+            bestState.firstCommand = CONST.dummyCommand;
+            System.err.println("command invalid");
+        }
+        return bestState.firstCommand;
+
+    }
+
+    static void showScores(TreeSet<State> set, int limit) {
+        int counter = 0;
+        for (State s : set) {
+
+            if (counter == limit) break;
+
+            System.err.println("score" + counter + ": " + s.score + "\n command: " + s.firstCommand.toString());
+            counter++;
+        }
+    }
+
+    static State updateQueue(State now, State bestState, TreeSet<State> queue, long currentTime, long limitTime) {
+        // assert now != null;
+        List<State> newStates = new ArrayList<>(); //まとめてevaluateするため一旦リストへ格納
+
+        //全方向移動・投球　または　魔法
+        for (int dir0 = 0; dir0 <= CONST.RADIANS.length; dir0++) { //i==lenで使えるなら魔法を使う。snaffleを持っているなら必ず投げる
+            for (int dir1 = 0; dir1 <= CONST.RADIANS.length; dir1++) {
+                State tmp = now.clone();
+
+                if (dir0 == CONST.RADIANS.length && dir1 == CONST.RADIANS.length) continue; //単純化のためdouble castはなし
+                //System.err.println("dir1: " + dir1);
+                //System.err.println("dir2: " + dir2);
+
+                //移動または投げるdirのとき、wiz0,1を更新。指定できない目標座標ならbreak
+                if (dir0 != CONST.RADIANS.length && updateStateForMoveAndThrow(dir0, 0, tmp)) {
+                    //System.err.println("break at dir1=" + dir1);
+                    break;
+                }
+                if (dir1 != CONST.RADIANS.length && updateStateForMoveAndThrow(dir1, 1, tmp)) {
+                    //System.err.println("break at dir2=" + dir2);
+                    continue;
+                }
+
+                //このブロックでnewStatesに追加
+                if (dir0 == CONST.RADIANS.length) { //castする場合、どうcastするか決めてStateListに追加する
+                    //assert !tmp.firstCommand.get(1).equals("");
+                    //FLIPENDO
+                    updateStateForSpellAndAddStateList(newStates, tmp, "FLIPENDO",
+                            CONST.cFlipendo, CONST.FLIPENDO_POWER, tmp.myMagic, 0);
+
+                    //Accio
+                    updateStateForSpellAndAddStateList(newStates, tmp, "ACCIO",
+                            CONST.cAccio, CONST.ACCIO_POWER, tmp.myMagic, 0);
+                    updateStateForPetAndAddStateList(newStates,tmp, tmp.myMagic, 0);
+                } else if (dir1 == CONST.RADIANS.length) {
+                    //assert !tmp.firstCommand.get(0).equals("");
+                    //FLIPENDO
+                    updateStateForSpellAndAddStateList(newStates, tmp, "FLIPENDO",
+                            CONST.cFlipendo, CONST.FLIPENDO_POWER, tmp.myMagic, 1);
+
+                    //Accio
+                    updateStateForSpellAndAddStateList(newStates, tmp, "ACCIO",
+                            CONST.cAccio, CONST.ACCIO_POWER, tmp.myMagic, 1);
+                    updateStateForPetAndAddStateList(newStates,tmp, tmp.myMagic, 1);
+                } else {//移動する場合、
+                    //assert !tmp.firstCommand.get(0).equals("") && !tmp.firstCommand.get(1).equals("");
+                    newStates.add(tmp);
+                }
+            }
+            currentTime = System.currentTimeMillis();
+            if (currentTime > limitTime)
+                break;
+        }
+        //System.err.println("size of new state:" + newStates.size());
+        for (State s : newStates) {
+            simulateTurnAndEvaluate(s);
+            bestState = updateStates(s, bestState, queue);
+        }
+
+        //System.err.println("fScore:"+queue.first().score);
+        //System.err.println("lScore:"+queue.last().score);
+        return bestState;
+    }
+
+    //return state having higher score
+    private static State getBestState(State newState, State bestState) {
+        //assert isValidCommand(newState.firstCommand);
+
+        return isValidCommand(bestState.firstCommand) ? (newState.score > bestState.score ? newState : bestState)
+                : newState;
+    }
+
+    private static boolean isValidCommand(List<String> command) {
+        return !(command.get(0).equals("") || command.get(1).equals(""));
+    }
+
+    //update treeset and return state having best score
+    private static State updateStates(State newState, State bestState, TreeSet<State> nextStates) {
+        nextStates.add(newState);
+
+        if (nextStates.size() > AIParams.BEAM_WIDTH)
+            nextStates.pollLast();
+
+        return getBestState(newState, bestState);
     }
 
 
+    // 移動するパターンの場合(dir != CONST.RADIANS.len)、目的座標を計算して次の速度を設定する
+    // return: true if cannot use destination
+    private static boolean updateStateForMoveAndThrow(int direction, int wizNum, State tmp) {
+        //if(direction == CONST.RADIANS.length) return false;
+
+        Wizard w = tmp.wizards.get(wizNum);
+        int destX = (int) w.x + Util.getMoveTargetDiffX(CONST.RADIANS[direction]);
+        int destY = (int) w.y + Util.getMoveTargetDiffY(CONST.RADIANS[direction]);
+
+        if (!Util.inField(destX, destY)) {
+            //System.err.println("break dest x:" + destX + " y:" + destY);
+            return true;
+        }
+
+        if (tmp.wizards.get(wizNum).state == 0) { //snaffleを持っていなければ移動
+            tmp.wizards.get(wizNum).vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(CONST.RADIANS[direction]);
+            tmp.wizards.get(wizNum).vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(CONST.RADIANS[direction]);
+
+            if (tmp.firstCommand.get(wizNum).equals(""))
+                tmp.firstCommand.set(wizNum, "MOVE " + destX + " " + destY + " " + CONST.WIZ_THRUST);
+
+        } else {
+            Snaffle throwTarget = (Snaffle) Util.getClosestThing(tmp.wizards.get(0), tmp.snaffles);
+            throwTarget.vx += CONST.THROW_POWER / CONST.SNAF_M * Math.cos(CONST.RADIANS[direction]);
+            throwTarget.vy += CONST.THROW_POWER / CONST.SNAF_M * Math.sin(CONST.RADIANS[direction]);
+            if (tmp.firstCommand.get(wizNum).equals(""))
+                tmp.firstCommand.set(wizNum, "THROW " + destX + " " + destY + " " + CONST.THROW_POWER);
+        }
+        return false;
+    }
+
+    //spellName: FLIPENDO or ACCIO, wizardId: 0 or 1
+    private static void updateStateForSpellAndAddStateList(List<State> newStates, State baseState, String spellName, int spellCost, double spellPower, int myMagic, int wizNum) {
+        if (spellCost < myMagic) {
+            for (int i = 0; i < baseState.snaffles.size(); i++) { //Flipendoを打つのはsnaffleに対してのみ
+                State tmp = baseState.clone();
+                Snaffle tmpTargetSnaf = baseState.snaffles.get(i);
+                //accioなら180度回転
+                double angle = spellName.equals("FLIPENDO") ? Util.getRadianAngle(tmp.wizards.get(wizNum), tmpTargetSnaf)
+                                                                : Util.getRadianAngle(tmpTargetSnaf, tmp.wizards.get(wizNum));
+                double dist = Util.getDistance(tmp.wizards.get(wizNum), tmpTargetSnaf);
+                double acc = Util.getSpellAcc(dist, spellPower);
+                tmp.snaffles.get(i).vx += acc / CONST.SNAF_M * Math.cos(angle);
+                tmp.snaffles.get(i).vy += acc / CONST.SNAF_M * Math.sin(angle);
+
+                tmp.myMagic -= spellCost;
+                if (tmp.firstCommand.get(wizNum).equals(""))
+                    tmp.firstCommand.set(wizNum, spellName + " " + tmp.snaffles.get(i).entityId);
+                //assert !tmp.firstCommand.get(0).equals("") && !tmp.firstCommand.get(1).equals("");
+                newStates.add(tmp);
+            }
+        }
+    }
+    private static void updateStateForPetAndAddStateList(List<State> newStates, State baseState, int myMagic, int wizNum) {
+        if(CONST.cPetrificus<myMagic){
+            for (int i=0;i<baseState.snaffles.size();i++){
+                if(Util.getSpeed(baseState.snaffles.get(i))<AIParams.PETRIF_SPEED)
+                    continue;
+
+                State tmp = baseState.clone();
+                Snaffle targetSnaf = baseState.snaffles.get(i);
+
+                tmp.snaffles.get(i).vx = 0;
+                tmp.snaffles.get(i).vy = 0;
+                tmp.myMagic -= CONST.cPetrificus;
+                if(tmp.firstCommand.get(wizNum).equals(""))
+                    tmp.firstCommand.set(wizNum, "PETRIFICUS "+targetSnaf.entityId);
+                newStates.add(tmp);
+            }
+        }
+    }
+
+    static void simulateTurnAndEvaluate(State s) {
+        State before = s.clone();
+        s.turnCount++;
+        s.generation++;
+        s.wizards.forEach(Wizard::move);
+        s.opWizards.forEach(Thing::move);
+        s.snaffles.forEach(Snaffle::move);
+        s.bludgers.forEach(Thing::move);
+
+        checkWizardGetSnaffle(before, s);
+        checkGoal(s);
+        s.setScore();
+    }
+
+    static void checkGoal(State state) {
+        List<Integer> removeSnafId = new ArrayList<>();
+        for (Snaffle s : state.snaffles) {
+            if (s.x < CONST.FIELD_Xmin) {
+                if (Global.myTeamId == 0) {
+                    state.opScore++;
+                } else {
+                    state.myScore++;
+                }
+                removeSnafId.add(s.entityId);
+            } else if (s.x > CONST.FIELD_Xmax) {
+                if (Global.myTeamId == 0) {
+                    state.myScore++;
+                } else {
+                    state.opScore++;
+                }
+                removeSnafId.add(s.entityId);
+            }
+        }
+        for (Integer i : removeSnafId) {
+            state.snaffles.removeIf((s) -> s.entityId == i);
+        }
+    }
+
+    static void checkWizardGetSnaffle(State before, State after) {
+        for (int i = 0; i < before.wizards.size(); i++) {
+            for (int j = 0; j < before.snaffles.size(); j++) {
+                if (Util.isIntersect((long) before.wizards.get(i).x, (long) before.wizards.get(i).y,
+                        (long) after.wizards.get(i).x, (long) after.wizards.get(i).y,
+                        (long) before.snaffles.get(j).x, (long) before.snaffles.get(j).y,
+                        (long) after.snaffles.get(j).x, (long) after.snaffles.get(j).y)) {
+                    after.snaffles.get(j).x = after.wizards.get(i).x;
+                    after.snaffles.get(j).vx = after.wizards.get(i).vx;
+                    after.snaffles.get(j).y = after.wizards.get(i).y;
+                    after.snaffles.get(j).vy = after.wizards.get(i).vy;
+                    after.wizards.get(i).state = 1;
+                    break;
+                }
+            }
+        }
+    }
 }
 
-class State implements Cloneable {
-    private Map<Integer, Wizard> wizards;
-    private Map<Integer, Thing> opWizards;
-    private Map<Integer, Snaffle> snaffles;
-    private Map<Integer, Thing> bludgers;
-    private int myScore;
-    private int myMagic;
-    private int opScore;
-    private int opMagic;
-    private List<String> firstCommand;
+class State implements Cloneable, Comparable {
+    long time;
+    public List<Wizard> wizards;
+    public List<Thing> opWizards;
+    public List<Snaffle> snaffles;
+    public List<Thing> bludgers;
+    public int myScore;
+    public int myMagic;
+    public int opScore;
+    public int opMagic;
+    public int turnCount;
+    public int generation;
+    public double score;
+    public List<String> firstCommand;  // 毎ターン、魔法使いに与えるコマンドを出力する必要がある
+    // コマンドはMOVE x y thrust, THROW x y power, FLIPENDO idなど
 
-    public State(Map<Integer, Wizard> wizards,
-                 Map<Integer, Thing> opWizards,
-                 Map<Integer, Snaffle> snaffles,
-                 Map<Integer, Thing> bludgers,
-                 int myScore, int myMagic, int opScore, int opMagic) {
-        this.wizards = new HashMap<>(wizards);
-        this.opWizards = new HashMap<>(opWizards);
-        this.snaffles = new HashMap<>(snaffles);
-        this.bludgers = new HashMap<>(bludgers);
+    public State(List<Wizard> wizards,
+                 List<Thing> opWizards,
+                 List<Snaffle> snaffles,
+                 List<Thing> bludgers,
+                 int myScore, int myMagic, int opScore, int opMagic, int turnCount, int generation) {
+        this.wizards = new ArrayList<>();
+        wizards.forEach((w) -> this.wizards.add(w.clone()));
+
+        this.opWizards = new ArrayList<>();
+        opWizards.forEach((ow) -> this.opWizards.add(ow.clone()));
+
+        this.snaffles = new ArrayList<>();
+        snaffles.forEach((s) -> this.snaffles.add(s.clone()));
+
+        this.bludgers = new ArrayList<>();
+        bludgers.forEach((b) -> this.bludgers.add(b.clone()));
+
         this.myScore = myScore;
         this.myMagic = myMagic;
         this.opScore = opScore;
         this.opMagic = opMagic;
-        //this.firstCommand = new ArrayList<>();
+        this.turnCount = turnCount;
+        this.generation = generation;
+        this.firstCommand = new ArrayList<>();  //空ならまだ１手も動かしていない
+        this.firstCommand.add("");
+        this.firstCommand.add("");
+        //clone時にはshallow copyされる
+        this.score = 0;
+        this.time = System.currentTimeMillis();
     }
 
     void showWizards() {
-        for (Map.Entry<Integer, Wizard> w : wizards.entrySet()) {
+        for (Wizard w : wizards) {
             System.err.println(w.toString());
         }
     }
 
     void showSnaffles() {
-        for (Map.Entry<Integer, Snaffle> s : snaffles.entrySet()) {
+        for (Snaffle s : snaffles) {
             System.err.println(s.toString());
         }
     }
 
-    int evaluate() {
-        return (myScore - opScore) * AIParams.EVAL_SCORE;
+    void setScore() {
+        final double[] sumDistToGoal = {0}; //0 ~ 100000程度
+        this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.targetGoalX, Global.targetGoalY));
+        double meanDistToGoal = sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
+
+        final double[] sumDistWiz2Snaf = {0};
+        this.wizards.forEach(sumDist2ClosestSnaf(sumDistWiz2Snaf));
+
+        final double[] sumDistOpWiz2Snaf = {0};
+        this.opWizards.forEach(sumDist2ClosestSnaf(sumDistOpWiz2Snaf));
+
+        //Score, wiz間の距離, snafのゴールまでの距離, wizとsnafの距離, opwizとsnafの距離
+        this.score = AIParams.SCORE_WEIGHT * (myScore - opScore)
+                + AIParams.WIZ_DIST_WEIGHT * Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
+                + AIParams.SNAF_MEAN_DIST_WEIGHT * (CONST.DIST2GOAL_BASE - meanDistToGoal)  //snaffleがゴールに近いほど良い
+                - AIParams.WIZ2SNAF_DIST_WEIGHT * sumDistWiz2Snaf[0]
+                + AIParams.OPWIZ2SNAF_DIST_WEIGHT * sumDistOpWiz2Snaf[0]
+                + AIParams.MAGIC_WEIGHT * myMagic;
+    }
+
+    void descScore() {
+        final double[] sumDistToGoal = {0}; //0 ~ 100000程度
+        this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.targetGoalX, Global.targetGoalY));
+        double meanDistToGoal = sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
+
+        final double[] sumDistWiz2Snaf = {0};
+        this.wizards.forEach(sumDist2ClosestSnaf(sumDistWiz2Snaf));
+
+        final double[] sumDistOpWiz2Snaf = {0};
+        this.opWizards.forEach(sumDist2ClosestSnaf(sumDistOpWiz2Snaf));
+        System.err.println("Pscore:" + AIParams.SCORE_WEIGHT * (myScore - opScore));
+        System.err.println("Pwizdist:" + AIParams.WIZ_DIST_WEIGHT * Util.getDistance(wizards.get(0), wizards.get(1)));
+        System.err.println("Psnafmean:" + -AIParams.SNAF_MEAN_DIST_WEIGHT * (CONST.DIST2GOAL_BASE - meanDistToGoal));
+        System.err.println("Pwiz2snaf:" + AIParams.WIZ2SNAF_DIST_WEIGHT * sumDistWiz2Snaf[0]);
+        System.err.println("Popwiz2snaf:" + AIParams.OPWIZ2SNAF_DIST_WEIGHT * sumDistOpWiz2Snaf[0]);
+    }
+
+    private Consumer<Thing> sumDist2ClosestSnaf(double[] sumDistWiz2Snaf) {
+        return (w) -> {
+            Snaffle s = (Snaffle) Util.getClosestThing(w, snaffles);
+            sumDistWiz2Snaf[0] += s == null ? 0 : Util.getDistance(w, s);
+        };
     }
 
     @Override
-    protected State clone(){
-        State tmp= null;
+    public int compareTo(Object o) {
+        State other = (State) o;
+        if (this.score == other.score) {
+            if (this.equals(o)) {
+                return 0;
+            } else {
+                return (int) (this.time - other.time);
+            }
+        }
+        return -(int) (this.score - other.score); //Descending order
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof State)) return false;
+
+        State state = (State) o;
+        if (time != state.time) return false;
+        if (myScore != state.myScore) return false;
+        if (myMagic != state.myMagic) return false;
+        if (opScore != state.opScore) return false;
+        if (opMagic != state.opMagic) return false;
+        if (turnCount != state.turnCount) return false;
+        if (Double.compare(state.score, score) != 0) return false;
+        if (!wizards.equals(state.wizards)) return false;
+        if (!opWizards.equals(state.opWizards)) return false;
+        if (!snaffles.equals(state.snaffles)) return false;
+        if (!bludgers.equals(state.bludgers)) return false;
+        return firstCommand.equals(state.firstCommand);
+    }
+
+    @Override
+    public int hashCode() {
+        int result;
+        long temp;
+        result = wizards.hashCode();
+        result = 31 * result + opWizards.hashCode();
+        result = 31 * result + snaffles.hashCode();
+        result = 31 * result + bludgers.hashCode();
+        result = 31 * result + myScore;
+        result = 31 * result + myMagic;
+        result = 31 * result + opScore;
+        result = 31 * result + opMagic;
+        result = 31 * result + turnCount;
+        temp = Double.doubleToLongBits(score);
+        result = 31 * result + (int) (temp ^ (temp >>> 32));
+        result = 31 * result + firstCommand.hashCode();
+        return result;
+    }
+
+    @Override
+    protected State clone() {
         try {
-            tmp = (State) super.clone(); //shallow copyなのでObject型のコピーは書く必要がある
-        } catch (CloneNotSupportedException e){
+            State tmp = (State) super.clone();  //shallow copyなのでObject型のコピーは書く必要がある
+            tmp.time = System.currentTimeMillis();  //TODO
+
+            //致し方なし
+            tmp.wizards = new ArrayList<>();
+            this.wizards.forEach((wiz) -> tmp.wizards.add(wiz.clone()));
+
+            tmp.opWizards = new ArrayList<>();
+            this.opWizards.forEach((opWiz) -> tmp.opWizards.add(opWiz.clone()));
+
+            tmp.snaffles = new ArrayList<>();
+            this.snaffles.forEach((snaf) -> tmp.snaffles.add(snaf.clone()));
+
+            tmp.bludgers = new ArrayList<>();
+            this.bludgers.forEach((bludg) -> tmp.bludgers.add(bludg.clone()));
+
+            tmp.firstCommand = new ArrayList<>(this.firstCommand);
+
+            return tmp;
+        } catch (CloneNotSupportedException e) {
             System.out.println(e.getMessage());
             throw new RuntimeException(e);
         }
-//        tmp.wizards = new HashMap<>(this.wizards);
-//        tmp.opWizards = new HashMap<>(this.opWizards);
-//        tmp.snaffles = new HashMap<>(this.snaffles);
-//        tmp.bludgers = new HashMap<>(this.bludgers);
-        return tmp;
+
     }
 
     @Override
@@ -161,16 +542,7 @@ class State implements Cloneable {
 }
 
 
-class Wizard extends Thing {
-
-    public static final int SHOOT_WIDTH = 50;
-
-    String command;
-    long commandX, commandY, power;
-    int targetId;
-    String message = "";
-    //boolean grabbing
-
+class Wizard extends Thing implements Cloneable {
     int runPower = 150;
     int throwPower = 500;
 
@@ -181,394 +553,22 @@ class Wizard extends Thing {
         super(t.x, t.y, t.vx, t.vy, t.state, t.entityId, t.entityType);
     }
 
-
-    private String throwSnaffle(Map<Integer, Thing> opWizards, Map<Integer, Thing> bludgers) {
-        //果たして下だけの場合に比べてthrowは良くなるのか！？
-
-        if (Util.dist2EnemyGoal(this) <= 8000 || Util.getMinDist2Enemies(this, opWizards) >= 5000) {
-            if (Global.myTeamId == 0) {
-                return "THROW 16000 3750 500";
-            } else {
-                return "THROW 0 3750 500";
-            }
-        }
-
-
-        String res;
-        command = "THROW";
-        power = throwPower;
-        List<Thing> obstacles = Util.margeThings(null, opWizards, null, bludgers);
-
-
-        double maxDist = Double.MIN_VALUE;
-        long maxDistX;
-        long maxDistY;
-
-        if (Global.myTeamId == 0) {
-            maxDistX = 16000;
-            maxDistY = 3750;
-//            res = "THROW 16000 3750 500";
-        } else {
-            maxDistX = 0;
-            maxDistY = 3750;
-//            res = "THROW 0 3750 500";
-        }
-
-        Thing t = this.getMoved();
-
-        final long throwR = 1000;
-        final double RANGE = 45;
-        final double lower = -RANGE;
-        final double higher = RANGE;
-        for (double deg = lower; deg < higher; deg += (higher - lower) / 5) {
-            double x = throwR * Math.cos(Math.toRadians(deg));
-
-            if (Global.myTeamId == 1) x *= -1;
-
-            double y = throwR * Math.sin(Math.toRadians(deg));
-
-            long x2 = t.x + Util.round(x);//目標地点
-            long y2 = t.y + Util.round(y);
-            System.err.println("tar:" + x2 + "," + y2);
-
-            if (!Util.isIn(x2, y2))
-                continue;
-
-            double minDist = Double.MAX_VALUE;
-            long minDistX = 0;
-            long minDistY = 0;
-            for (Thing it : obstacles) {
-                Thing it2 = it.getMoved();
-                double dist = Util.distPoints(x2, y2, it2.x, it2.y);
-                if (dist < minDist) {
-                    minDistX = x2;
-                    minDistY = y2;
-                }
-            }
-            if (maxDist < minDist) {
-                maxDistX = minDistX;
-                maxDistY = minDistY;
-            }
-        }
-
-        //補正
-        maxDistX -= this.vx;
-        maxDistY -= this.vy;
-
-        this.commandX = maxDistX;
-        this.commandY = maxDistY;
-
-        return "THROW " + maxDistX + " " + maxDistY + " " + throwPower;
-    }
-
-    String move(Map<Integer, Snaffle> snaffles, Map<Integer, Thing> opWizards, int without) {
-        Thing t = Util.getClosest(this, snaffles, without);
-
-        if (t == null) {
-            t = Util.getClosest(this, snaffles, -1);
-        }
-
-        if (t != null) {
-            command = "MOVE";
-            x = t.x;
-            y = t.y;
-            targetId = t.entityId;
-            power = runPower;
-            return "MOVE " + t.x + " " + t.y + " " + runPower;
-        } else {
-            return "MOVE 7500 3500 150";
-        }
-    }
-
-    boolean willPetrificus(Map<Integer, Snaffle> snaffles, Map<Integer, Thing> opWizards) {
-        if (!isCastable(Global.cPetrificus))
-            return false;
-
-
-        for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
-            //自陣側ゴールに近いsnaffle かつ 高速でゴールに向かっているものについて、
-            if (Util.distMyGoal(e.getValue()) <= AIParams.PETRIF_FIELD &&
-                    Util.getSpeed(e.getValue()) >= AIParams.PETRIF_SPEED &&
-                    Util.isGoingToMyGoal(e.getValue())) {
-                long myDist2Snaffle = Util.getDistance(this, e.getValue());
-                //boolean petri = true;
-                //全ての相手よりも自分のほうが近ければ
-                /*for (Map.Entry<Integer, Thing> w : opWizards.entrySet()) {
-                    if (myDist2Snaffle > Util.getDistance(w.getValue(), e.getValue())) {
-                        //petri = false;
-                        return false;
-                    }
-                }*/
-                //if (petri) {
-                Integer checker = Global.castHistory.get(e.getValue().entityId);
-                checker = checker == null ? 0 : checker;
-                if ((checker + AIParams.reCastPET) < Global.turnCount) {
-                    this.targetId = e.getValue().entityId;
-                    return true;
-                }
-                //}
-            }
-        }
-        return false;
-    }
-
-    boolean willAccio(Map<Integer, Wizard> wizards, Map<Integer, Snaffle> snaffles, Map<Integer, Thing> opWizards) {
-        if (!isCastable(Global.cAccio))
-            return false;
-
-        for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
-            //snaffleが自陣側ゴールに近くて、引き寄せられる範囲なら
-            boolean f1 = Util.distMyGoal(e.getValue()) <= AIParams.ACCIO_FIELD;
-            System.err.println("ac_near:" + f1);
-            boolean f2 = Util.getDistance(this, e.getValue()) <= AIParams.ACCIO_DIST;
-            System.err.println("ac_dist:" + f2);
-            if (f1 && f2) {
-
-                //近くに相手がいれば
-                for (Map.Entry<Integer, Thing> opW : opWizards.entrySet()) {
-                    if (Util.getDistance(e.getValue(), opW.getValue()) <= AIParams.ACCIO_SURROUNDIST) {
-                        boolean enemyNear = enemyNear(wizards, opWizards, e.getValue());
-                        System.err.println("enear:" + enemyNear);
-                        if (enemyNear) {
-                            this.targetId = e.getValue().entityId;
-                            return true;
-                        }
-                    }
-                }
-
-            }
-        }
-        return false;
-    }
-
-    boolean enemyNear(Map<Integer, Wizard> wizards, Map<Integer, Thing> opWizards, Snaffle s) {
-        long eMinDist = Long.MAX_VALUE;
-        for (Map.Entry<Integer, Thing> opw : opWizards.entrySet()) {
-            long d = Util.getDistance(opw.getValue(), s);
-            if (eMinDist > d) {
-                eMinDist = d;
-            }
-        }
-        long mMinDist = Long.MAX_VALUE;
-        for (Map.Entry<Integer, Wizard> w : wizards.entrySet()) {
-            long d = Util.getDistance(w.getValue(), s);
-            if (mMinDist > d) {
-                mMinDist = d;
-            }
-        }
-        return eMinDist < mMinDist;
-    }
-
-    boolean willFlipend(Map<Integer, Snaffle> snaffles, List<Thing> obstacles) {
-        if (!isCastable(Global.cFlipend))   //|| dist2Goal() < AIParams.FLIP_FIELD
-            return false;
-
-        // this.message+="castable ";
-        //ゴール側のモノを列挙
-        int goalX = Global.targetGoalX;
-        int mid = (Global.pollUpper + Global.pollLower) / 2;
-        List<Thing> objects = new ArrayList<>();
-        for (Thing t : obstacles) {
-            if (isOffenceSide(goalX, mid, t) && t.entityId != this.entityId) {
-                System.err.println("gt:" + t.entityId);
-                objects.add(t);
-            }
-        }
-
-        //goal側のsnaffleを対象にする
-        Map<Integer, Snaffle> targets = goalSideSnaffles(snaffles);
-
-        //１つも無いなら入るかどうかだけ確かめる
-        if (objects.isEmpty()) {
-            // this.message += "no obstacle";
-            for (Map.Entry<Integer, Snaffle> e : targets.entrySet()) {
-                if (isShootable(e.getValue())) {
-                    this.targetId = e.getValue().entityId;
-                    //System.err.println("flip because no obstacle");
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        boolean shoot = false;
-        double maxDist = Double.MIN_VALUE;
-        int targetId = -1;
-        //this.message += "obst ";
-        //ゴール側の全ての対象を調べる
-        for (Map.Entry<Integer, Snaffle> e : targets.entrySet()) {
-            //現在地からゴールに向かって打てる
-            if (isShootable(e.getValue())) {
-                //this.message+="shootable ";
-                Thing right;
-                Thing left;
-                if (this.x < e.getValue().x) {
-                    right = this;
-                    left = e.getValue();
-                } else {
-                    right = e.getValue();
-                    left = this;
-                }
-
-                Thing from = Global.myTeamId == 0 ? right : left;
-
-                long gy = Util.getExtendedPoint(left.x, left.y, right.x, right.y);
-
-                long goalx = Global.targetGoalX;
-                goalx += Global.myTeamId == 0 ? +50 : -50;
-                //最も障害物との距離が遠い
-                for (Thing t : objects) {
-                    Thing t2 = t.getMoved();
-                    double d = Util.getDistObj2line(from.x, from.y, goalx, gy, t2.x, t2.y);//goalx..補正がかかった方
-                    if (maxDist < d && (t2.r + AIParams.FLIP_BUFF) < d) {
-                        shoot = true;
-                        maxDist = d;
-                        targetId = e.getValue().entityId;
-                    }
-                }
-            }
-        }
-        if (shoot) {
-            //this.message += "shble";
-            this.targetId = targetId;
-        } else {
-            //this.message += "cant";
-        }
-        return shoot;
-
-    }
-
-    long dist2Goal() {
-        return Math.abs(Global.targetGoalX - this.x);
-    }
-
-    Map<Integer, Snaffle> goalSideSnaffles(Map<Integer, Snaffle> snaffles) {
-        Map<Integer, Snaffle> res = new HashMap<>();
-        for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
-            if (Global.myTeamId == 0) {
-                if (this.x <= e.getValue().x)
-                    res.put(e.getKey(), e.getValue());
-            } else {
-                if (e.getValue().x <= this.x)
-                    res.put(e.getKey(), e.getValue());
-            }
-
-        }
-        return res;
-    }
-
-    //コストと状況からうつべきかどうか判断
-
-    boolean willFlipend(List<Thing> list) {
-        if (!isCastable(20))
-            return false;
-
-        //ゴール側のモノのみ調べる
-        int goalX = Global.myTeamId == 0 ? 16000 : 0;
-        int mid = (Global.pollUpper + Global.pollLower) / 2;
-        List<Thing> objects = new ArrayList<>();
-        for (Thing t : list) {
-            if (isOffenceSide(goalX, mid, t))
-                objects.add(t);
-        }
-
-        //ゴール側のものが１つも無いなら打ち込む場所は真ん中
-        if (objects.isEmpty()) {
-            this.commandX = goalX;
-            this.commandY = mid;
-            return true;    //falseのほうがいいかなあ
-        }
-
-        //ゴール範囲をglobal.divnumで割った分だけ調べる
-        List<Integer> goalY = new ArrayList<>();
-        for (int i = Global.pollLower; i <= Global.pollUpper; i += Global.pollDiff) {
-            if (i == Global.pollLower || i == Global.pollUpper)
-                continue;
-            goalY.add(i);
-        }
-
-        boolean flipend = false;
-        //当たらないコースがあれば flipend=true
-        //また、他の物体からもっとも離れるようなコースを選択して、Wizardにメモる
-        double maxDist = Double.MIN_VALUE;
-        for (Integer tmpY : goalY) {
-            for (Thing t : objects) {
-                double d = Util.getDistObj2line(this.x, this.y, goalX, tmpY, t.x, t.y);
-                if (d > (t.r + Global.SNAF_R + SHOOT_WIDTH) && d > maxDist) { //打つのに十分な幅があり、今までの
-                    flipend = true;
-                    this.commandX = t.x;
-                    this.commandY = t.y;
-
-                }
-            }
-        }
-        return flipend;
-    }
-
-    //自分よりゴール側にあるsniffleを打ってみる
-    boolean isShootable(Thing t) {
-        Thing me = this.getMoved();
-        Thing moved = t.getMoved();
-        {
-            long dist = Util.getDistance(me, moved);
-            //System.err.println(dist);
-            if (dist > AIParams.SHOOTRANGE) {
-                this.message += " too long";
-                return false;
-            }
-        }
-        {
-            long dist = Util.dist2EnemyGoal(t);
-            if (dist > 10000)
-                return false;
-        }
-
-
-        //if(moved.state)
-
-
-        /*double angG = Util.getAngleOfVectors(Global.targetGoalX - this.x, Global.pollUpper - this.y, Global.targetGoalX - this.x, Global.pollLower - this.y);
-        double angT = Util.getAngleOfVectors(Global.targetGoalX - this.x, Global.pollUpper - this.y, t.x - this.x, t.y - this.y);
-        System.err.println(angG +" " +angT);
-        double diff = angT - angG;
-        this.message += " g: " + angG + " t:" + angT + " ";
-        return angG > angT;*/
-        if (Global.myTeamId == 0) {
-            long gy = Util.getExtendedPoint(me.x, me.y, moved.x, moved.y);
-            System.err.println("fId,tId,gy:" + me.entityId + "," + moved.entityId + "," + gy);
-            long goalx = Global.targetGoalX;
-            goalx += Global.myTeamId == 0 ? +50 : -50;
-            return Util.isIntersect(me.x, me.y, goalx, gy, Global.targetGoalX, Global.pollUpper, Global.targetGoalX, Global.pollLower);
-        } else {
-            long gy = Util.getExtendedPoint(moved.x, moved.y, me.x, me.y);
-            System.err.println("fId,tId,gy:" + me.entityId + "," + moved.entityId + "," + gy);
-            long goalx = Global.targetGoalX;
-            goalx += Global.myTeamId == 0 ? +50 : -50;
-            return Util.isIntersect(me.x, me.y, goalx, gy, Global.targetGoalX, Global.pollLower, Global.targetGoalX, Global.pollUpper);
-        }
-    }
-
-    boolean isOffenceSide(long targetX, long targetY, Thing t) {
-        boolean flag;
-        if (Global.myTeamId == 0) {
-            flag = this.x <= t.x;
-        } else {
-            flag = t.x <= this.x;
-        }
-        return flag && Util.rad2deg(Util.getAngleOfVectors(targetX - this.x, targetY - this.y, t.x - this.x, t.y - this.y)) <= 120.0;
-    }
-
-    boolean isCastable(int cost) {
-        return Global.turnCount - Global.usedSpellCost >= cost;
+    @Override
+    public Wizard clone() {
+        return (Wizard) super.clone();
     }
 
 }
 
-class OpWizard extends Thing {
+class OpWizard extends Thing implements Cloneable {
+    @Override
+    protected OpWizard clone() {
+        return (OpWizard) super.clone();
+    }
 
 }
 
-class Snaffle extends Thing {
+class Snaffle extends Thing implements Cloneable {
     public Snaffle() {
     }
 
@@ -580,13 +580,18 @@ class Snaffle extends Thing {
     public String toString() {
         return "Snaffle" + super.toString();
     }
+
+    @Override
+    protected Snaffle clone() {
+        return (Snaffle) super.clone();
+    }
 }
 
-class Thing {
+class Thing implements Cloneable {
     public Thing() {
     }
 
-    public Thing(int x, int y, int vx, int vy, int state, int entityId, String entityType) {
+    public Thing(double x, double y, double vx, double vy, int state, int entityId, String entityType) {
         this.x = x;
         this.y = y;
         this.vx = vx;
@@ -596,52 +601,94 @@ class Thing {
         this.entityType = entityType;
         switch (this.entityType) {
             case "WIZARD":
-                this.r = 400;
+                this.r = CONST.WIZ_R;
+                this.m = CONST.WIZ_M;
+                this.f = CONST.WIZ_F;
                 break;
             case "OPPONENT_WIZARD":
-                this.r = 400;
+                this.r = CONST.WIZ_R;
+                this.m = CONST.WIZ_M;
+                this.f = CONST.WIZ_F;
                 break;
             case "SNAFFLE":
-                this.r = 150;
+                this.r = CONST.SNAF_R;
+                this.m = CONST.SNAF_M;
+                this.f = CONST.SNAF_F;
                 break;
             case "BLUDGER":
-                this.r = 200;
+                this.r = CONST.BLUD_R;
+                this.m = CONST.BLUD_M;
+                this.f = CONST.BLUD_F;
                 break;
             default:
         }
     }
 
-    public Thing getMoved() {
-        Thing t = new Thing();
-        t.x = this.x + this.vx;
-        t.y = this.y + this.vy;
-        t.vx = (int) Util.round(this.vx * Util.getFriction(this.entityType));
-        t.vy = (int) Util.round(this.vy * Util.getFriction(this.entityType));
-        t.state = this.state; //ホントは違う
-        t.entityId = this.entityId;
-        t.entityType = this.entityType;
-        t.r = this.r;
-        //System.err.println("moved x,y,id:"+t.x+" "+t.y+" "+t.entityId);
-        return t;
+    /**
+     * movement of entities is computed as following
+     * 1. Thrust
+     * 2. Spell power
+     * 3. Movement
+     * 4. Friction
+     * 5. Rounding
+     */
+    //x, vはdoubleだが加速時とこのメソッドないでしか小数部は出ない
+    public void move() {
+        //3, 5
+        this.x = this.x + this.vx;
+        this.y = this.y + this.vy;
+
+        //calculate collisions to field line
+        bound();
+
+        //4
+        this.vx *= this.f;
+        this.vy *= this.f;
+
+        //5
+        this.x = Math.round(this.x);
+        this.y = Math.round(this.y);
+        this.vx = Math.round(this.vx);
+        this.vy = Math.round(this.vy);
     }
 
-    public void update(Thing t) {
-        this.x = t.x;
-        this.y = t.y;
-        this.vx = t.vx;
-        this.vy = t.vy;
-        this.state = t.state;
-        this.entityId = t.entityId;
+    public void bound() {
+        //Bound
+        int checkYmin = CONST.FIELD_Ymin + this.r;
+        int checkYmax = CONST.FIELD_Ymax - this.r;
+
+        if (this.y < checkYmin) {
+            this.y = checkYmin + (checkYmin - this.y); //y==0 で折り返してrを足す
+            this.vy = -this.vy;
+        } else if (this.y > (CONST.FIELD_Ymax - this.r)) {
+            this.y = checkYmax - (this.y - checkYmax);
+            this.vy = -this.vy;
+        }
+
+        int checkXmin = CONST.FIELD_Xmin + this.r;
+        int checkXmax = CONST.FIELD_Xmax - this.r;
+
+        if (!((CONST.POLL_LOWER + this.r) < y && (y < (CONST.POLL_UPPER - this.r)))) {
+            if (this.x < checkXmin) {
+                this.x = checkXmin + (checkXmin - this.x); //x==0 で折り返してrを足す
+                this.vx = -this.vx;
+            } else if (this.x > (CONST.FIELD_Xmax - this.r)) {
+                this.x = checkXmax - (this.x - checkXmax);
+                this.vx = -this.vx;
+            }
+        }
     }
 
-    int x;
-    int y;
-    int vx;
-    int vy;
+    double x;
+    double y;
+    double vx;
+    double vy;
     int state;
     int entityId;
     String entityType;
     int r;
+    double m;
+    double f;
 
     @Override
     public String toString() {
@@ -655,17 +702,23 @@ class Thing {
                 ", entityType='" + entityType + '\'' +
                 '}';
     }
+
+    @Override
+    protected Thing clone() {
+        try {
+            return (Thing) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }
 
 class Global {
+
     static int turnCount = 0;
     static int usedSpellCost = 0;
     static int myTeamId = 0;
     static int divideGoalNum = 100;
-
-    static double WIZ_FRICTION = 0.75;
-    static double SNAF_FRICTION = 0.75;
-    static double BLUD_FRICTION = 0.9;
 
     static int targetGoalX;
     static int targetGoalY;
@@ -673,25 +726,79 @@ class Global {
     static int myGoalX;
     static int myGoalY;
 
-    static int cFlipend = 20;
-    static int cAccio = 20;
-    static int cPetrificus = 10;
-    static int obliviate = 5;
-
-    static int pollLower = 2050;
-    static int pollUpper = 5450;
-    static int pollDiff = (pollUpper - pollLower) / divideGoalNum;
+    static int pollDiff = (CONST.POLL_UPPER - CONST.POLL_LOWER) / divideGoalNum;
 
     static int buffer = 300;
-    static int shootLower = pollLower + buffer;
-    static int shootUpper = pollUpper - buffer;
+    static int shootLower = CONST.POLL_LOWER + buffer;
+    static int shootUpper = CONST.POLL_UPPER - buffer;
+}
+
+class CONST {
+    static double WIZ_F = 0.75;
+    static double SNAF_F = 0.75;
+    static double BLUD_F = 0.9;
 
     static int SNAF_R = 150;
     static int WIZ_R = 400;
-    static int OPWIZ_R = 400;
     static int BLUD_R = 200;
 
-    static Map<Integer, Integer> castHistory = new HashMap<>();
+    static double SNAF_M = 0.5;
+    static double WIZ_M = 1;
+    static double BLUD_M = 8;
+
+    static int cFlipendo = 20;
+    static int cAccio = 20;
+    static int cPetrificus = 10;
+    static int cObliviate = 5;
+
+    static double FLIPENDO_POWER = 6000.0;
+    static double ACCIO_POWER = 3000.0;
+
+    static int MANA_BUFFER = 10;
+
+    static int[] SPELL_COST = {20, 20, 10, 5}; //Flipend, Accio, Petrificus, Obliviate
+    static String[] SPELL_STR = {"FLIPENDO", "ACCIO", "PETRIFICUS", "OBLIVIATE"};
+
+    static int POLL_LOWER = 2050;
+    static int POLL_UPPER = 5450;
+
+    static int FIELD_Xmin = 0;
+    static int FIELD_Xmax = 16000;
+    static int FIELD_Ymin = 0;
+    static int FIELD_Ymax = 7500;
+
+    static int WIZ_THRUST = 150;
+    static int THROW_POWER = 500;
+
+    private static int DEGREE_DIFF = 15;
+
+    static double DIST2GOAL_BASE = 7500;
+
+    static Integer[] MOVE_X;
+    static Integer[] MOVE_Y;
+    static int WIZ_DEST_R = 500;
+    static Double[] RADIANS;
+
+    static List<String> dummyCommand = new ArrayList<>();
+
+    static {
+        dummyCommand.add("MOVE 7500 3500 150");
+        dummyCommand.add("MOVE 7500 3500 150");
+
+
+        List<Integer> x = new ArrayList<>();
+        List<Integer> y = new ArrayList<>();
+        List<Double> rads = new ArrayList<>();
+
+        for (int i = 0; i < 360; i += DEGREE_DIFF) {
+            rads.add(Math.toRadians(i));
+            x.add((int) Math.round(WIZ_DEST_R * Math.cos(Math.toRadians(i))));
+            y.add((int) Math.round(WIZ_DEST_R * Math.sin(Math.toRadians(i))));
+        }
+        MOVE_X = x.toArray(new Integer[0]);
+        MOVE_Y = y.toArray(new Integer[0]);
+        RADIANS = rads.toArray(new Double[0]);
+    }
 }
 
 class Util {
@@ -703,14 +810,14 @@ class Util {
         long tb = (cx - dx) * (by - cy) + (cy - dy) * (cx - bx);
         long tc = (ax - bx) * (cy - ay) + (ay - by) * (ax - cx);
         long td = (ax - bx) * (dy - ay) + (ay - by) * (ax - dx);
-
-        boolean flag = tc * td < 0 && ta * tb < 0;
+        return tc * td < 0 && ta * tb < 0;
+        /*boolean flag = tc * td < 0 && ta * tb < 0;
         if (flag) {
             System.err.println(ta + "," + tb + "," + tc + "," + td);
             System.err.println("(" + ax + "," + ay + "," + bx + "," + by + ")(" + cx + "," + cy + "," + dx + "," + dy + ") insersects.");
         }
 
-        return flag;
+        return flag;*/
     }
 
     //round half away from zero: ゼロから遠い方へ丸める
@@ -729,10 +836,6 @@ class Util {
         return Math.acos(cosTheta); //radian
     }
 
-    static double rad2deg(double radian) {
-        return radian * 180.0 / Math.PI;
-    }
-
     static double getVectorLength(long x, long y) {
         return Math.sqrt(x * x + y * y);
     }
@@ -745,7 +848,7 @@ class Util {
         long v2y = targetY - fromY;
 
         long d = Math.abs(crossVector(v1x, v1y, v2x, v2y));
-        double l = distPoints(fromX, fromY, toX, toY);
+        double l = getDistFromCoordinates(fromX, fromY, toX, toY);
         return (double) d / l;
     }
 
@@ -759,67 +862,25 @@ class Util {
         return v1x * v2y - v1y * v2x;
     }
 
-    static double distPoints(long x1, long y1, long x2, long y2) {
+    static double getDistFromCoordinates(long x1, long y1, long x2, long y2) {
         long diffx = x2 - x1;
         long diffy = y2 - y1;
         return Math.sqrt(diffx * diffx + diffy * diffy);
     }
 
-    static long getDistance(Thing from, Thing to) {
-        return (long) Math.sqrt((to.x - from.x) * (to.x - from.x) + (to.y - from.y) * (to.y - from.y));
+    static double getDistance(Thing from, Thing to) {
+        return Math.sqrt((to.x - from.x) * (to.x - from.x) + (to.y - from.y) * (to.y - from.y));
     }
 
     static double getSpeed(Thing t) {
         return Math.sqrt(t.vx * t.vx + t.vy * t.vy);
     }
 
-    // -1 if there is no without
-    static Thing getClosest(Thing from, Map<Integer, Snaffle> map, int without) {
-        long minDist = Long.MAX_VALUE;
-        Thing minThing = null;
-        for (Map.Entry<Integer, Snaffle> e : map.entrySet()) {
-//            if(e.getValue().isOut())
-//                continue;
-
-            long dist = getDistance(from, e.getValue());
-            if (from.entityId != e.getValue().entityId && e.getValue().entityId != without && dist < minDist) {
-                minDist = dist;
-                minThing = e.getValue();
-            }
-        }
-        return minThing;
-    }
-
-    static Thing getClosest(Thing from, Map<Integer, Snaffle> list) {
-        return getClosest(from, list, -1);
+    static double getRadianAngle(Thing from, Thing to) {
+        return Math.atan2(to.y - from.y, to.x - from.x);
     }
 
     //-------------その他
-    static void removeNeedlessSnaffles(List<Integer> updated, Map<Integer, Snaffle> snaffles) {
-        List<Integer> list = snaffles.entrySet().stream().filter(e -> !updated.contains(e.getKey())).map(Map.Entry::getKey).collect(Collectors.toList());
-        list.forEach(snaffles::remove);
-    }
-
-    static List<Thing> margeThings(Map<Integer, Wizard> wizards, Map<Integer, Thing> opWizards, Map<Integer, Snaffle> snaffles, Map<Integer, Thing> bludgers) {
-        List<Thing> res = new ArrayList<>();
-        if (opWizards != null) {
-            for (Map.Entry<Integer, Thing> e : opWizards.entrySet()) {
-                res.add(e.getValue());
-            }
-        }
-        if (snaffles != null) {
-            for (Map.Entry<Integer, Snaffle> e : snaffles.entrySet()) {
-                res.add(e.getValue());
-            }
-        }
-        if (bludgers != null) {
-            for (Map.Entry<Integer, Thing> e : bludgers.entrySet()) {
-                res.add(e.getValue());
-            }
-        }
-        return res;
-    }
-
     static void setCenterOfGoal() {
         Global.myGoalX = Global.myTeamId == 0 ? 0 : 16000;
         Global.myGoalY = 3750;
@@ -830,27 +891,31 @@ class Util {
     static double getFriction(String entityType) {
         switch (entityType) {
             case "WIZARD":
-                return Global.WIZ_FRICTION;
+                return CONST.WIZ_F;
             case "OPPONENT_WIZARD":
-                return Global.WIZ_FRICTION;
+                return CONST.WIZ_F;
             case "SNAFFLE":
-                return Global.SNAF_FRICTION;
+                return CONST.SNAF_F;
             case "BLUDGER":
-                return Global.BLUD_FRICTION;
+                return CONST.BLUD_F;
             default:
                 return 1.0;
         }
     }
 
-    static long round(double num) {
-        return (long) (Math.ceil(Math.abs(num)) * (num > 0 ? 1 : -1));
+    static int getMoveTargetDiffX(double rad) {
+        return (int) Math.round(CONST.WIZ_DEST_R * Math.cos(rad));
     }
 
-    static long distMyGoal(Thing t) {
+    static int getMoveTargetDiffY(double rad) {
+        return (int) Math.round(CONST.WIZ_DEST_R * Math.sin(rad));
+    }
+
+    static double distMyGoal(Thing t) {
         return Math.abs(Global.myGoalX - t.x);
     }
 
-    static long dist2EnemyGoal(Thing t) {
+    static double dist2EnemyGoal(Thing t) {
         return Math.abs(Global.targetGoalX - t.x);
     }
 
@@ -862,18 +927,18 @@ class Util {
         return Global.myTeamId == 0 ? t.vx > 0 : t.vx < 0;
     }
 
-    public static boolean isOut(long x, long y) {
+    static boolean outOfField(long x, long y) {
         return !(0 < x && x < 16000 && 0 < y && y < 7500);
     }
 
-    public static boolean isIn(long x, long y) {
+    static boolean inField(long x, long y) {
         return (0 < x && x < 16000 && 0 < y && y < 7500);
     }
 
-    public static long getMinDist2Enemies(Thing t, Map<Integer, Thing> opWizards) {
-        long minDist = Long.MAX_VALUE;
+    static double getMinDist2Enemies(Thing t, Map<Integer, Thing> opWizards) {
+        double minDist = Double.MAX_VALUE;
         for (Map.Entry<Integer, Thing> e : opWizards.entrySet()) {
-            long d = getDistance(t, e.getValue());
+            double d = getDistance(t, e.getValue());
             if (minDist > d) {
                 minDist = d;
             }
@@ -881,57 +946,43 @@ class Util {
         return minDist;
     }
 
-    /*public static boolean inEmargency(Snaffle s){
-        return Util.distMyGoal(s)
-    }*/
+    //アップキャストして使えるよ　Thingは参照で渡します
+    static Thing getClosestThing(Thing t, List<? extends Thing> list) {
+        Thing closest = null;
+        double minDist = Double.MAX_VALUE;
 
-    /*String generateCommand(Map<Integer, Wizard> wizards, Map<Integer, Thing> opWizards, Map<Integer, Snaffle> snaffles, Map<Integer, Thing> bludgers, int without) {
-        this.message = "";
+        //if (list.isEmpty()) System.err.println("getClosestThing list is empty");
 
-        String res;
-
-        if (this.state == 0) {//持ってない
-            if (willPetrificus(snaffles, opWizards)) {
-                Global.usedSpellCost += Global.cPetrificus;
-                res = "PETRIFICUS " + this.targetId;
-                Global.castHistory.put(this.targetId, Global.turnCount);
-            } else if (willFlipend(snaffles, Util.margeThings(wizards, opWizards, snaffles, bludgers))) {
-                Global.usedSpellCost += Global.cFlipend;
-                res = "FLIPENDO " + this.targetId;
-            } else if (willAccio(wizards, snaffles, opWizards)) {
-                Global.usedSpellCost += Global.cAccio;
-                res = "ACCIO " + this.targetId;
-            } else {
-                res = move(snaffles, opWizards, without);
+        for (Thing tmp : list) {
+            double dist2tmp = Util.getDistance(t, tmp);
+            if (minDist > dist2tmp) {
+                minDist = dist2tmp;
+                closest = tmp;
             }
-
-        } else {//持ってる
-            res = throwSnaffle(opWizards, bludgers);
-
         }
-        if (!this.message.equals(""))
-            res += " " + this.message;
-        //res += " hello";
-        return res;
-    }*/
+        return closest;
+    }
+
+    //base: filpendo-> 6000, accio-> 3000
+    static double getSpellAcc(double dist, double basePower) {
+        double tmp = dist / 1000.0;
+        return Math.min(basePower / (tmp * tmp), 1000);
+    }
+
 }
 
 class AIParams {
-    static int SHOOTRANGE = 1500;
+    static int SCORE_WEIGHT = 10000;
+    static double WIZ_DIST_WEIGHT = 0.01;
+    static double SNAF_MEAN_DIST_WEIGHT = 12;
+    static double WIZ2SNAF_DIST_WEIGHT = 1;
+    static double OPWIZ2SNAF_DIST_WEIGHT = 0.01;
+    static double MAGIC_WEIGHT = 3;
 
-    static int PETRIF_SPEED = 1100;
-    static int ACCIO_DIST = 4000;
+    static double PETRIF_SPEED = 1100; //投げたときの最大速度が500/0.5=1000
 
-    static int ACCIO_FIELD = 4500;
-    static int FLIP_FIELD = 5000;
-    static int PETRIF_FIELD = 10000;
+    static int BEAM_WIDTH = 100;
 
-    static int ACCIO_SURROUNDIST = 3000;
-    static int FLIP_BUFF = 500;
-
-    static int reCastPET = 3;
-
-    static int EVAL_SCORE = 100;
-    static int EVAL_COVER_FIELD = 5;
-    static int EVAL_COVER_DISTANCE = 3000;
+    static int SEARCH_DURATION = 85;
 }
+
