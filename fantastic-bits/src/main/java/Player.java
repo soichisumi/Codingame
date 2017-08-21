@@ -158,7 +158,7 @@ class Player {
                     //Accio
                     updateStateForSpellAndAddStateList(newStates, tmp, "ACCIO",
                             CONST.cAccio, CONST.ACCIO_POWER, tmp.myMagic, 0);
-                    updateStateForPetAndAddStateList(newStates,tmp, tmp.myMagic, 0);
+                    updateStateForPetAndAddStateList(newStates, tmp, tmp.myMagic, 0);
                 } else if (dir1 == CONST.RADIANS.length) {
                     //assert !tmp.firstCommand.get(0).equals("");
                     //FLIPENDO
@@ -168,7 +168,7 @@ class Player {
                     //Accio
                     updateStateForSpellAndAddStateList(newStates, tmp, "ACCIO",
                             CONST.cAccio, CONST.ACCIO_POWER, tmp.myMagic, 1);
-                    updateStateForPetAndAddStateList(newStates,tmp, tmp.myMagic, 1);
+                    updateStateForPetAndAddStateList(newStates, tmp, tmp.myMagic, 1);
                 } else {//移動する場合、
                     //assert !tmp.firstCommand.get(0).equals("") && !tmp.firstCommand.get(1).equals("");
                     newStates.add(tmp);
@@ -235,6 +235,9 @@ class Player {
 
         } else {
             Snaffle throwTarget = (Snaffle) Util.getClosestThing(tmp.wizards.get(0), tmp.snaffles);
+
+            if (throwTarget == null) return false;
+
             throwTarget.vx += CONST.THROW_POWER / CONST.SNAF_M * Math.cos(CONST.RADIANS[direction]);
             throwTarget.vy += CONST.THROW_POWER / CONST.SNAF_M * Math.sin(CONST.RADIANS[direction]);
             if (tmp.firstCommand.get(wizNum).equals(""))
@@ -251,7 +254,17 @@ class Player {
                 Snaffle tmpTargetSnaf = baseState.snaffles.get(i);
                 //accioなら180度回転
                 double angle = spellName.equals("FLIPENDO") ? Util.getRadianAngle(tmp.wizards.get(wizNum), tmpTargetSnaf)
-                                                                : Util.getRadianAngle(tmpTargetSnaf, tmp.wizards.get(wizNum));
+                        : Util.getRadianAngle(tmpTargetSnaf, tmp.wizards.get(wizNum));
+                double deg = Math.toDegrees(angle);
+
+                if (-90 <= deg && deg <= 90) {
+                    if (Global.myTeamId == 1)
+                        continue;
+                } else {
+                    if (Global.myTeamId == 0)
+                        continue;
+                }
+
                 double dist = Util.getDistance(tmp.wizards.get(wizNum), tmpTargetSnaf);
                 double acc = Util.getSpellAcc(dist, spellPower);
                 tmp.snaffles.get(i).vx += acc / CONST.SNAF_M * Math.cos(angle);
@@ -265,10 +278,13 @@ class Player {
             }
         }
     }
+
     private static void updateStateForPetAndAddStateList(List<State> newStates, State baseState, int myMagic, int wizNum) {
-        if(CONST.cPetrificus<myMagic){
-            for (int i=0;i<baseState.snaffles.size();i++){
-                if(Util.getSpeed(baseState.snaffles.get(i))<AIParams.PETRIF_SPEED)
+        if (CONST.cPetrificus < myMagic) {
+            for (int i = 0; i < baseState.snaffles.size(); i++) {
+                if (Util.getSpeed(baseState.snaffles.get(i)) < AIParams.PETRIF_SPEED)
+                    continue;
+                if (Math.abs(baseState.snaffles.get(i).x - (double) Global.myGoalX) > AIParams.PETRIF_RANGE_X)
                     continue;
 
                 State tmp = baseState.clone();
@@ -277,8 +293,8 @@ class Player {
                 tmp.snaffles.get(i).vx = 0;
                 tmp.snaffles.get(i).vy = 0;
                 tmp.myMagic -= CONST.cPetrificus;
-                if(tmp.firstCommand.get(wizNum).equals(""))
-                    tmp.firstCommand.set(wizNum, "PETRIFICUS "+targetSnaf.entityId);
+                if (tmp.firstCommand.get(wizNum).equals(""))
+                    tmp.firstCommand.set(wizNum, "PETRIFICUS " + targetSnaf.entityId);
                 newStates.add(tmp);
             }
         }
@@ -403,7 +419,7 @@ class State implements Cloneable, Comparable {
     void setScore() {
         final double[] sumDistToGoal = {0}; //0 ~ 100000程度
         this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.targetGoalX, Global.targetGoalY));
-        double meanDistToGoal = sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
+        double meanDistToGoal = snaffles.size() == 0 ? 0 : sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
 
         final double[] sumDistWiz2Snaf = {0};
         this.wizards.forEach(sumDist2ClosestSnaf(sumDistWiz2Snaf));
@@ -411,19 +427,25 @@ class State implements Cloneable, Comparable {
         final double[] sumDistOpWiz2Snaf = {0};
         this.opWizards.forEach(sumDist2ClosestSnaf(sumDistOpWiz2Snaf));
 
+        final int[] countDengerSnaffles = {0};
+        this.snaffles.forEach((s) -> {
+            if (Math.abs(s.x - (double) Global.myGoalX) < AIParams.SNAF_PENALTY_RANGE_X) countDengerSnaffles[0]++;
+        });
+
         //Score, wiz間の距離, snafのゴールまでの距離, wizとsnafの距離, opwizとsnafの距離
         this.score = AIParams.SCORE_WEIGHT * (myScore - opScore)
                 + AIParams.WIZ_DIST_WEIGHT * Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
                 + AIParams.SNAF_MEAN_DIST_WEIGHT * (CONST.DIST2GOAL_BASE - meanDistToGoal)  //snaffleがゴールに近いほど良い
                 - AIParams.WIZ2SNAF_DIST_WEIGHT * sumDistWiz2Snaf[0]
                 + AIParams.OPWIZ2SNAF_DIST_WEIGHT * sumDistOpWiz2Snaf[0]
-                + AIParams.MAGIC_WEIGHT * myMagic;
+                + AIParams.MAGIC_WEIGHT * myMagic
+                - AIParams.DENGER_SNAF_PENALTY * countDengerSnaffles[0];
     }
 
     void descScore() {
         final double[] sumDistToGoal = {0}; //0 ~ 100000程度
         this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.targetGoalX, Global.targetGoalY));
-        double meanDistToGoal = sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
+        double meanDistToGoal = snaffles.size() == 0 ? 0 : sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
 
         final double[] sumDistWiz2Snaf = {0};
         this.wizards.forEach(sumDist2ClosestSnaf(sumDistWiz2Snaf));
@@ -973,16 +995,21 @@ class Util {
 
 class AIParams {
     static int SCORE_WEIGHT = 10000;
-    static double WIZ_DIST_WEIGHT = 0.01;
+    static double WIZ_DIST_WEIGHT = 0.3;
     static double SNAF_MEAN_DIST_WEIGHT = 12;
     static double WIZ2SNAF_DIST_WEIGHT = 1;
-    static double OPWIZ2SNAF_DIST_WEIGHT = 0.01;
-    static double MAGIC_WEIGHT = 3;
+    static double OPWIZ2SNAF_DIST_WEIGHT = 0.1;
+    static double MAGIC_WEIGHT = 10;
+
+    static double SNAF_PENALTY_RANGE_X = 2500;
+    static double DENGER_SNAF_PENALTY = 5000;
+
+    static double PETRIF_RANGE_X = 6000;
 
     static double PETRIF_SPEED = 1100; //投げたときの最大速度が500/0.5=1000
 
-    static int BEAM_WIDTH = 100;
+    static int BEAM_WIDTH = 110;
 
-    static int SEARCH_DURATION = 85;
+    static int SEARCH_DURATION = 90;
 }
 

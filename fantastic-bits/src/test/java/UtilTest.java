@@ -160,4 +160,31 @@ public class UtilTest {
             System.out.println("y: "+destY);
         }
     }
+    @Test
+    public void testGetRadian(){
+        Thing t1 = UtilForTest.generateDefaultThing();
+        t1.x=0;
+        t1.y=0;
+
+        Thing t2 = UtilForTest.generateDefaultThing();
+        t2.x=1;
+        t2.y=1;
+        assertEquals(45,Math.toDegrees(Util.getRadianAngle(t1,t2)),1e-6);
+
+        Thing t3 = UtilForTest.generateDefaultThing();
+        t3.x=0;
+        t3.y=1;
+        assertEquals(90,Math.toDegrees(Util.getRadianAngle(t1,t3)),1e-6);
+
+        Thing t4 = UtilForTest.generateDefaultThing();
+        t4.x=-1;
+        t4.y=-1;
+        assertEquals(-135,Math.toDegrees(Util.getRadianAngle(t1,t4)),1e-6);
+    }
+
+    @Test
+    public void testCos(){
+        assertEquals(1.0,Math.cos(Math.toRadians(360)),1e-6);
+    }
+
 }

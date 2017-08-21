@@ -19,7 +19,7 @@ public class UtilForTest {
         c.add(new Snaffle(t));
         List<Thing> d = new ArrayList<>();
         d.add(t);
-        return new State(a, b, c, d, 10, 20, 30, 40,1);
+        return new State(a, b, c, d, 10, 20, 30, 40,1,0);
     }
 
     //consumer:ラムダ式を返すメソッド
