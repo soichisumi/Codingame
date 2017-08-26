@@ -174,6 +174,7 @@ class Player {
                     newStates.add(tmp);
                 }
             }
+
             currentTime = System.currentTimeMillis();
             if (currentTime > limitTime)
                 break;
@@ -302,43 +303,52 @@ class Player {
 
     static void simulateTurnAndEvaluate(State s) {
         State before = s.clone();
+
+        addCommandToOpWizards(s);
+
         s.turnCount++;
         s.generation++;
+
         s.wizards.forEach(Wizard::move);
         s.opWizards.forEach(Thing::move);
         s.snaffles.forEach(Snaffle::move);
         s.bludgers.forEach(Thing::move);
 
         checkWizardGetSnaffle(before, s);
-        checkGoal(s);
+        s.snaffles.removeIf((snaf) -> (snaf.x < CONST.FIELD_Xmin || snaf.x > CONST.FIELD_Xmax) );
         s.setScore();
     }
 
-    static void checkGoal(State state) {
-        List<Integer> removeSnafId = new ArrayList<>();
-        for (Snaffle s : state.snaffles) {
-            if (s.x < CONST.FIELD_Xmin) {
-                if (Global.myTeamId == 0) {
-                    state.opScore++;
-                } else {
-                    state.myScore++;
+    static void addCommandToOpWizards(State s){
+        if(s.snaffles.size()==0)
+            return;
+
+        for(Thing opWiz : s.opWizards){
+            if(opWiz.state==0) {
+                Thing closest = null;
+                double minDist = Double.MAX_VALUE;
+                for (Thing snaf : s.snaffles) {
+                    double dist = Util.getDistance(opWiz, snaf);
+                    if (minDist > dist) {
+                        closest = snaf;
+                        minDist = dist;
+                    }
                 }
-                removeSnafId.add(s.entityId);
-            } else if (s.x > CONST.FIELD_Xmax) {
-                if (Global.myTeamId == 0) {
-                    state.myScore++;
-                } else {
-                    state.opScore++;
-                }
-                removeSnafId.add(s.entityId);
+                double rad = Util.getRadianAngle(opWiz, closest);
+                opWiz.vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(rad);
+                opWiz.vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(rad);
+
+            }else{
+                Snaffle snaf = (Snaffle) Util.getClosestThing(opWiz,s.snaffles);
+                double rad=Util.getRadianAngle(snaf,Global.myGoal);
+                snaf.vx = CONST.THROW_POWER / CONST.SNAF_M * Math.cos(rad);
+                snaf.vy = CONST.THROW_POWER / CONST.SNAF_M * Math.sin(rad);
             }
-        }
-        for (Integer i : removeSnafId) {
-            state.snaffles.removeIf((s) -> s.entityId == i);
         }
     }
 
     static void checkWizardGetSnaffle(State before, State after) {
+        //自分
         for (int i = 0; i < before.wizards.size(); i++) {
             for (int j = 0; j < before.snaffles.size(); j++) {
                 if (Util.isIntersect((long) before.wizards.get(i).x, (long) before.wizards.get(i).y,
@@ -354,11 +364,26 @@ class Player {
                 }
             }
         }
+        //相手
+        for (int i = 0; i < before.opWizards.size(); i++) {
+            for (int j = 0; j < before.snaffles.size(); j++) {
+                if (Util.isIntersect((long) before.opWizards.get(i).x, (long) before.opWizards.get(i).y,
+                        (long) after.opWizards.get(i).x, (long) after.opWizards.get(i).y,
+                        (long) before.snaffles.get(j).x, (long) before.snaffles.get(j).y,
+                        (long) after.snaffles.get(j).x, (long) after.snaffles.get(j).y)) {
+                    after.snaffles.get(j).x = after.opWizards.get(i).x;
+                    after.snaffles.get(j).vx = after.opWizards.get(i).vx;
+                    after.snaffles.get(j).y = after.opWizards.get(i).y;
+                    after.snaffles.get(j).vy = after.opWizards.get(i).vy;
+                    after.opWizards.get(i).state = 1;
+                    break;
+                }
+            }
+        }
     }
 }
 
 class State implements Cloneable, Comparable {
-    long time;
     public List<Wizard> wizards;
     public List<Thing> opWizards;
     public List<Snaffle> snaffles;
@@ -401,24 +426,11 @@ class State implements Cloneable, Comparable {
         this.firstCommand.add("");
         //clone時にはshallow copyされる
         this.score = 0;
-        this.time = System.currentTimeMillis();
-    }
-
-    void showWizards() {
-        for (Wizard w : wizards) {
-            System.err.println(w.toString());
-        }
-    }
-
-    void showSnaffles() {
-        for (Snaffle s : snaffles) {
-            System.err.println(s.toString());
-        }
     }
 
     void setScore() {
         final double[] sumDistToGoal = {0}; //0 ~ 100000程度
-        this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.targetGoalX, Global.targetGoalY));
+        this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.opGoalX, Global.opGoalY));
         double meanDistToGoal = snaffles.size() == 0 ? 0 : sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
 
         final double[] sumDistWiz2Snaf = {0};
@@ -444,7 +456,7 @@ class State implements Cloneable, Comparable {
 
     void descScore() {
         final double[] sumDistToGoal = {0}; //0 ~ 100000程度
-        this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.targetGoalX, Global.targetGoalY));
+        this.snaffles.forEach((s) -> sumDistToGoal[0] += Util.getDistFromCoordinates((long) s.x, (long) s.y, Global.opGoalX, Global.opGoalY));
         double meanDistToGoal = snaffles.size() == 0 ? 0 : sumDistToGoal[0] / snaffles.size(); //0 ~ 15000で、基本±3000の予想
 
         final double[] sumDistWiz2Snaf = {0};
@@ -469,13 +481,13 @@ class State implements Cloneable, Comparable {
     @Override
     public int compareTo(Object o) {
         State other = (State) o;
-        if (this.score == other.score) {
+        /*if (this.score == other.score) {
             if (this.equals(o)) {
                 return 0;
             } else {
                 return (int) (this.time - other.time);
             }
-        }
+        }*/
         return -(int) (this.score - other.score); //Descending order
     }
 
@@ -485,7 +497,6 @@ class State implements Cloneable, Comparable {
         if (!(o instanceof State)) return false;
 
         State state = (State) o;
-        if (time != state.time) return false;
         if (myScore != state.myScore) return false;
         if (myMagic != state.myMagic) return false;
         if (opScore != state.opScore) return false;
@@ -522,7 +533,6 @@ class State implements Cloneable, Comparable {
     protected State clone() {
         try {
             State tmp = (State) super.clone();  //shallow copyなのでObject型のコピーは書く必要がある
-            tmp.time = System.currentTimeMillis();  //TODO
 
             //致し方なし
             tmp.wizards = new ArrayList<>();
@@ -583,6 +593,7 @@ class Wizard extends Thing implements Cloneable {
 }
 
 class OpWizard extends Thing implements Cloneable {
+
     @Override
     protected OpWizard clone() {
         return (OpWizard) super.clone();
@@ -643,6 +654,9 @@ class Thing implements Cloneable {
                 this.f = CONST.BLUD_F;
                 break;
             default:
+                this.r = 1;
+                this.m = 1;
+                this.f = 1;
         }
     }
 
@@ -742,8 +756,8 @@ class Global {
     static int myTeamId = 0;
     static int divideGoalNum = 100;
 
-    static int targetGoalX;
-    static int targetGoalY;
+    static int opGoalX;
+    static int opGoalY;
 
     static int myGoalX;
     static int myGoalY;
@@ -753,6 +767,9 @@ class Global {
     static int buffer = 300;
     static int shootLower = CONST.POLL_LOWER + buffer;
     static int shootUpper = CONST.POLL_UPPER - buffer;
+
+    static Thing myGoal;
+    static Thing opGoal;
 }
 
 class CONST {
@@ -845,7 +862,7 @@ class Util {
     //round half away from zero: ゼロから遠い方へ丸める
     //http://www.ftext.org/text/subsubsection/2365
     static long getExtendedPoint(long ax, long ay, long bx, long by) {
-        long goalx = Global.targetGoalX;
+        long goalx = Global.opGoalX;
         goalx += Global.myTeamId == 0 ? +50 : -50;
         double d = (double) (by - ay) / (double) (bx - ax) * (goalx - ax) + ay;
         return (long) Math.ceil(Math.abs(d)) * (d > 0 ? 1 : -1);
@@ -898,6 +915,7 @@ class Util {
         return Math.sqrt(t.vx * t.vx + t.vy * t.vy);
     }
 
+    //fromからtoへの角度を返す。±180度をradに変換したものが帰ってくる
     static double getRadianAngle(Thing from, Thing to) {
         return Math.atan2(to.y - from.y, to.x - from.x);
     }
@@ -906,8 +924,13 @@ class Util {
     static void setCenterOfGoal() {
         Global.myGoalX = Global.myTeamId == 0 ? 0 : 16000;
         Global.myGoalY = 3750;
-        Global.targetGoalX = Global.myTeamId == 0 ? 16000 : 0;
-        Global.targetGoalY = 3750;
+        Global.opGoalX = Global.myTeamId == 0 ? 16000 : 0;
+        Global.opGoalY = 3750;
+
+        Global.myGoal = new Thing(Global.myGoalX, Global.myGoalY,
+                0.0,0.0, 0, -1,"" );
+        Global.opGoal = new Thing(Global.opGoalX, Global.opGoalY,
+                0.0,0.0, 0, -2,"" );
     }
 
     static double getFriction(String entityType) {
@@ -938,7 +961,7 @@ class Util {
     }
 
     static double dist2EnemyGoal(Thing t) {
-        return Math.abs(Global.targetGoalX - t.x);
+        return Math.abs(Global.opGoalX - t.x);
     }
 
     static boolean isGoingToMyGoal(Thing t) {

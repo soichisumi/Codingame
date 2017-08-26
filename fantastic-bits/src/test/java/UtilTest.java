@@ -1,6 +1,5 @@
 import org.junit.Test;
 
-import javax.xml.transform.Source;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
@@ -186,5 +185,32 @@ public class UtilTest {
     public void testCos(){
         assertEquals(1.0,Math.cos(Math.toRadians(360)),1e-6);
     }
+
+    /*@Test
+    public void testCheckGoal(){
+        State s =UtilForTest.generateDefaultState();
+        s.snaffles.clear();
+        Thing t = UtilForTest.generateDefaultThing();
+        t.x=-50;
+        t.y=50;
+        s.snaffles.add(new Snaffle(t));
+
+        t.x=50;
+        s.snaffles.add(new Snaffle(t));
+
+        t.x =CONST.FIELD_Xmax-50;
+        s.snaffles.add(new Snaffle(t));
+
+        t.x =CONST.FIELD_Xmax+50;
+        s.snaffles.add(new Snaffle(t));
+
+        assertEquals(s.snaffles.size(), 4);
+
+        Player.removeOuterSnaffles(s);
+
+        assertEquals(s.snaffles.size(), 2);
+        assertEquals((int) s.snaffles.get(0).x, 50);
+        assertEquals((int) s.snaffles.get(1).x, CONST.FIELD_Xmax-50);
+    }*/
 
 }
