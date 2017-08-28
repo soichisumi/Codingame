@@ -213,4 +213,16 @@ public class UtilTest {
         assertEquals((int) s.snaffles.get(1).x, CONST.FIELD_Xmax-50);
     }*/
 
+    @Test
+    public void testIntersect(){
+        assertTrue(Util.isIntersect(1,1,10,10,
+                                    10, 1, 1,10));
+
+        assertTrue(Util.isIntersect(0,0,0,10,
+                                    10,5,-10,5));
+
+        assertTrue(Util.isIntersect(-10,0,10,0,
+                                    10,10,-10,-10));
+    }
+
 }
