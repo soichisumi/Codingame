@@ -158,7 +158,7 @@ class Player {
                 //System.err.println("dir1: " + dir1);
                 //System.err.println("dir2: " + dir2);
 
-                //移動または投げるdirのとき、wiz0,1を更新。指定できない目標座標ならbreak
+                //移動または投げるdirのとき、wiz0,1を更新。指定できない目標座標なら追加しない
                 if (dir0 != CONST.RADIANS.length && updateStateForMoveAndThrow(dir0, 0, tmp)) {
                     //System.err.println("break at dir1=" + dir1);
                     break;
@@ -248,15 +248,15 @@ class Player {
             return true;
         }
 
-        if (tmp.wizards.get(wizNum).state == 0) { //snaffleを持っていなければ移動
-            tmp.wizards.get(wizNum).vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(CONST.RADIANS[direction]);
-            tmp.wizards.get(wizNum).vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(CONST.RADIANS[direction]);
+        if (w.state == 0) { //snaffleを持っていなければ移動
+            w.vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(CONST.RADIANS[direction]);
+            w.vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(CONST.RADIANS[direction]);
 
             if (tmp.firstCommand.get(wizNum).equals(""))
                 tmp.firstCommand.set(wizNum, "MOVE " + destX + " " + destY + " " + CONST.WIZ_THRUST);
 
         } else {
-            Snaffle throwTarget = (Snaffle) Util.getClosestThing(tmp.wizards.get(0), tmp.snaffles);
+            Snaffle throwTarget = (Snaffle) Util.getClosestThing(w, tmp.snaffles);
 
             if (throwTarget == null) return false;
 
@@ -278,9 +278,11 @@ class Player {
             for (int i = 0; i < baseState.snaffles.size(); i++) { //Flipendoを打つのはsnaffleに対してのみ
                 State tmp = baseState.clone();
                 Snaffle tmpTargetSnaf = baseState.snaffles.get(i);
+                Wizard targetWiz = tmp.wizards.get(wizNum);
+
                 //accioなら180度回転
-                double angle = spellName.equals("FLIPENDO") ? Util.getRadianAngle(tmp.wizards.get(wizNum), tmpTargetSnaf)
-                        : Util.getRadianAngle(tmpTargetSnaf, tmp.wizards.get(wizNum));
+                double angle = spellName.equals("FLIPENDO") ? Util.getRadianAngle(targetWiz, tmpTargetSnaf)
+                        : Util.getRadianAngle(tmpTargetSnaf, targetWiz);
                 double deg = Math.toDegrees(angle);
 
                 //効果ある方向に打つか
@@ -292,7 +294,7 @@ class Player {
                         continue;
                 }
 
-                double dist = Util.getDistance(tmp.wizards.get(wizNum), tmpTargetSnaf);
+                double dist = Util.getDistance(targetWiz, tmpTargetSnaf);
                 double acc = Util.getSpellAcc(dist, spellPower);
 
                 //ACCIOなら遠すぎないかチェック
@@ -388,6 +390,7 @@ class Player {
         s.setScore();
     }
 
+    //最も近いsnaffleに近づくか、ゴールに向かって投げる
     static void addCommandToOpWizards(State s){
         if(s.snaffles.size()==0)
             return;
@@ -775,7 +778,7 @@ class Thing implements Cloneable {
         this.y = Math.round(this.y);
         this.vx = Math.round(this.vx);
         this.vy = Math.round(this.vy);
-    }
+    } //addComment
 
     public void bound() {
         //Bound
