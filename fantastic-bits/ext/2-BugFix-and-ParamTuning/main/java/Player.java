@@ -66,9 +66,9 @@ class Player {
             List<String> res = solve(turnStartTime, new State(wizards, opWizards, snaffles, bludgers, myScore, myMagic, opScore, opMagic, Global.turnCount, 0));
 
             for (int i = 0; i < 2; i++) {
-                for (String s : CONST.SPELL_STR)
-                    if (res.get(i).contains(s))
-                        Global.lastCastTurn = Global.turnCount;
+                for(String s:CONST.SPELL_STR)
+                    if(res.get(i).contains(s))
+                        Global.lastCastTurn=Global.turnCount;
                 //System.err.println(res.get(i));
                 System.out.println(res.get(i));
             }
@@ -76,7 +76,7 @@ class Player {
         }
     }
 
-    static void inspectStartState(State s) {
+    static void inspectStartState(State s){
         System.err.println("snaffle size:" + s.snaffles.size());
     }
 
@@ -169,7 +169,7 @@ class Player {
                 }
 
                 //このブロックでnewStatesに追加
-                if (dir0 == CONST.RADIANS.length && tmp.wizards.get(0).state == 0) { //castする場合、どうcastするか決めてStateListに追加する
+                if (dir0 == CONST.RADIANS.length) { //castする場合、どうcastするか決めてStateListに追加する
                     //assert !tmp.firstCommand.get(1).equals("");
                     //FLIPENDO
                     updateStateForSpellAndAddStateList(newStates, tmp, "FLIPENDO",
@@ -179,7 +179,7 @@ class Player {
                     updateStateForSpellAndAddStateList(newStates, tmp, "ACCIO",
                             CONST.cAccio, CONST.ACCIO_POWER, tmp.myMagic, 0);
                     updateStateForPetAndAddStateList(newStates, tmp, tmp.myMagic, 0);
-                } else if (dir1 == CONST.RADIANS.length && tmp.wizards.get(1).state == 0) {
+                } else if (dir1 == CONST.RADIANS.length) {
                     //assert !tmp.firstCommand.get(0).equals("");
                     //FLIPENDO
                     updateStateForSpellAndAddStateList(newStates, tmp, "FLIPENDO",
@@ -297,16 +297,16 @@ class Player {
                 double dist = Util.getDistance(targetWiz, tmpTargetSnaf);
                 double acc = Util.getSpellAcc(dist, spellPower);
 
-                if (Util.checkNext2TurnIsOut(tmp.snaffles.get(i)))
+                if(Util.checkNext2TurnIsOut(tmp.snaffles.get(i)))
                     continue;
 
                 //ACCIOなら遠すぎないかチェック
-                if (spellName.equals("ACCIO") && (dist > AIParams.ACCIO_DIST_MAX || dist < AIParams.ACCIO_DIST_MIN))
+                if(spellName.equals("ACCIO") && dist > AIParams.ACCIO_DIST_MAX)
                     continue;
 
                 //FLIPENDOなら10ターン後に入るかチェック
-                if (spellName.equals("FLIPENDO") &&
-                        (dist > AIParams.FLIP_DIST_MAX || !willPassGoal(tmpTargetSnaf, acc, angle) || dist < AIParams.FLIP_DIST_MIN))
+                if(spellName.equals("FLIPENDO") &&
+                        (dist > AIParams.FLIP_DIST_MAX || !willPassGoal(tmpTargetSnaf, acc, angle)))
                     continue;
 
                 tmp.snaffles.get(i).vx += acc / CONST.SNAF_M * Math.cos(angle);
@@ -321,28 +321,28 @@ class Player {
         }
     }
 
-    private static boolean willPassGoal(Snaffle snaf, double acc, double ang) {
+    private static boolean willPassGoal(Snaffle snaf, double acc, double ang){
         Snaffle tmp = snaf.clone();
         tmp.vx += acc / CONST.SNAF_M * Math.cos(ang);
         tmp.vy += acc / CONST.SNAF_M * Math.sin(ang);
-        for (int i = 0; i < AIParams.FLIPENDO_LOOP; i++)
+        for(int i=0;i<AIParams.FLIPENDO_LOOP;i++)
             tmp.move();
 
         return Util.isIntersect(Global.opGoalX, CONST.POLL_LOWER + AIParams.FLIP_PASS_GOAL_BUFFER,
-                Global.opGoalX, CONST.POLL_UPPER - AIParams.FLIP_PASS_GOAL_BUFFER,
-                snaf.x, snaf.y,
-                tmp.x, tmp.y);
+                                Global.opGoalX, CONST.POLL_UPPER - AIParams.FLIP_PASS_GOAL_BUFFER,
+                                snaf.x, snaf.y,
+                                tmp.x,tmp.y);
     }
 
     private static void updateStateForPetAndAddStateList(List<State> newStates, State baseState, int myMagic, int wizNum) {
         if (CONST.cPetrificus < myMagic &&
-                (Global.lastCastTurn + AIParams.RECAST_TURN) < Global.turnCount) {
+                (Global.lastCastTurn + AIParams.RECAST_TURN) < Global.turnCount ) {
             for (int i = 0; i < baseState.snaffles.size(); i++) {
                 if (Util.getSpeed(baseState.snaffles.get(i)) < AIParams.PETRIF_SPEED)
                     continue;
 //                if (Math.abs(baseState.snaffles.get(i).x - (double) Global.myGoalX) > AIParams.PETRIF_RANGE_X)
 //                    continue;
-                if (Util.checkNext2TurnIsOut(baseState.snaffles.get(i)))
+                if( Util.checkNext2TurnIsOut(baseState.snaffles.get(i)) )
                     continue;
 
                 State tmp = baseState.clone();
@@ -373,33 +373,33 @@ class Player {
 
         checkWizardGetSnaffle(before, s);
         s.snaffles.removeIf((snaf) -> {
-            if (snaf.x < CONST.FIELD_Xmin) {
-                if (Global.myTeamId == 0) {
+            if(snaf.x < CONST.FIELD_Xmin){
+                if(Global.myTeamId==0){
                     s.opScore++;
-                } else {
+                }else{
                     s.myScore++;
                 }
                 return true;
-            } else if (snaf.x > CONST.FIELD_Xmax) {
-                if (Global.myTeamId == 0) {
+            }else if(snaf.x > CONST.FIELD_Xmax){
+                if(Global.myTeamId==0){
                     s.myScore++;
-                } else {
+                }else{
                     s.opScore++;
                 }
                 return true;
             }
             return false;
-        });
+        } );
         s.setScore();
     }
 
     //最も近いsnaffleに近づくか、ゴールに向かって投げる
-    static void addCommandToOpWizards(State s) {
-        if (s.snaffles.size() == 0)
+    static void addCommandToOpWizards(State s){
+        if(s.snaffles.size()==0)
             return;
 
-        for (Thing opWiz : s.opWizards) {
-            if (opWiz.state == 0) {
+        for(Thing opWiz : s.opWizards){
+            if(opWiz.state==0) {
                 Thing closest = null;
                 double minDist = Double.MAX_VALUE;
                 for (Thing snaf : s.snaffles) {
@@ -413,9 +413,9 @@ class Player {
                 opWiz.vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(rad);
                 opWiz.vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(rad);
 
-            } else {
-                Snaffle snaf = (Snaffle) Util.getClosestThing(opWiz, s.snaffles);
-                double rad = Util.getRadianAngle(snaf, Global.myGoal);
+            }else{
+                Snaffle snaf = (Snaffle) Util.getClosestThing(opWiz,s.snaffles);
+                double rad=Util.getRadianAngle(snaf,Global.myGoal);
                 snaf.vx = CONST.THROW_POWER / CONST.SNAF_M * Math.cos(rad);
                 snaf.vy = CONST.THROW_POWER / CONST.SNAF_M * Math.sin(rad);
             }
@@ -426,9 +426,10 @@ class Player {
         //自分
         for (int i = 0; i < before.wizards.size(); i++) {
             for (int j = 0; j < before.snaffles.size(); j++) {
-                if (Util.isIntersect(before.wizards.get(i), after.wizards.get(i),
-                        before.snaffles.get(j), after.snaffles.get(j))
-                        || Util.checkCollision(before.wizards.get(i), before.snaffles.get(j), after.snaffles.get(j))) {
+                if (Util.isIntersect((long) before.wizards.get(i).x, (long) before.wizards.get(i).y,
+                        (long) after.wizards.get(i).x, (long) after.wizards.get(i).y,
+                        (long) before.snaffles.get(j).x, (long) before.snaffles.get(j).y,
+                        (long) after.snaffles.get(j).x, (long) after.snaffles.get(j).y)) {
                     after.snaffles.get(j).x = after.wizards.get(i).x;
                     after.snaffles.get(j).vx = after.wizards.get(i).vx;
                     after.snaffles.get(j).y = after.wizards.get(i).y;
@@ -441,9 +442,10 @@ class Player {
         //相手
         for (int i = 0; i < before.opWizards.size(); i++) {
             for (int j = 0; j < before.snaffles.size(); j++) {
-                if (Util.isIntersect(before.opWizards.get(i), after.opWizards.get(i),
-                        before.snaffles.get(j), after.snaffles.get(j))
-                        || Util.checkCollision(before.wizards.get(i), before.snaffles.get(j), after.snaffles.get(j))) {
+                if (Util.isIntersect((long) before.opWizards.get(i).x, (long) before.opWizards.get(i).y,
+                        (long) after.opWizards.get(i).x, (long) after.opWizards.get(i).y,
+                        (long) before.snaffles.get(j).x, (long) before.snaffles.get(j).y,
+                        (long) after.snaffles.get(j).x, (long) after.snaffles.get(j).y)) {
                     after.snaffles.get(j).x = after.opWizards.get(i).x;
                     after.snaffles.get(j).vx = after.opWizards.get(i).vx;
                     after.snaffles.get(j).y = after.opWizards.get(i).y;
@@ -506,12 +508,12 @@ class State implements Cloneable, Comparable {
         final double[] distToOpGoalReward = {0}; //Weight * snaffle
         final double[] distToMyGoalPenalty = {0};
         this.snaffles.forEach((s) -> {
-            distToOpGoalReward[0] += Math.pow(AIParams.SNAF_DIST2OPGOAL_WEIGHT,
-                    (CONST.FIELD_MAX_DIST - Util.getDistance(s, Global.opGoal)) / CONST.FIELD_Xmax);
+            distToOpGoalReward[0]+= Math.pow(AIParams.SNAF_DIST2OPGOAL_WEIGHT,
+                            (CONST.FIELD_MAX_DIST-Util.getDistance(s,Global.opGoal))/CONST.FIELD_Xmax);
             /*distToMyGoalPenalty[0] += Math.pow(AIParams.SNAF_DIST2MYGOAL_WEIGHT,
                             (CONST.FIELD_MAX_DIST-Util.getDistance(s,Global.myGoal))/CONST.FIELD_Xmax);*/
             distToMyGoalPenalty[0] += Math.pow(AIParams.SNAF_DIST2MYGOAL_WEIGHT,
-                    (CONST.FIELD_MAX_DIST - Math.abs(s.x - Global.myGoalX)) / CONST.FIELD_Xmax);
+                    (CONST.FIELD_MAX_DIST-Math.abs(s.x-Global.myGoalX))/CONST.FIELD_Xmax);
         });
         /* やっぱ平均はだめ
         final double[] meanSnafDistToOpGoal = {0};
@@ -530,26 +532,26 @@ class State implements Cloneable, Comparable {
 
         //Score, wiz間の距離, snafのゴールまでの距離, wizとsnafの距離, opwizとsnafの距離
         this.score = AIParams.SCORE_WEIGHT * (myScore - opScore)
-                + AIParams.WIZ_X_DIST_WEIGHT * Math.abs(wizards.get(0).x - wizards.get(1).x)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
-                - Math.pow(AIParams.WIZ_X_DIST_POWW, (CONST.FIELD_Xmax - Math.abs(wizards.get(0).x - wizards.get(1).x)) / CONST.FIELD_Xmax)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
+                + AIParams.WIZ_X_DIST_WEIGHT * Math.abs(wizards.get(0).x-wizards.get(1).x)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
+                - Math.pow(AIParams.WIZ_X_DIST_POWW,(CONST.FIELD_Xmax-Math.abs(wizards.get(0).x-wizards.get(1).x))/CONST.FIELD_Xmax)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
                 //+ AIParams.WIZ_Y_DIST_WEIGHT * Math.abs(wizards.get(0).y-wizards.get(1).y)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
-                //- Math.pow(AIParams.WIZ_Y_DIST_POWW,(CONST.FIELD_Ymax-Math.abs(wizards.get(0).y-wizards.get(1).y))/CONST.FIELD_Ymax)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
+                - Math.pow(AIParams.WIZ_Y_DIST_POWW,(CONST.FIELD_Ymax-Math.abs(wizards.get(0).y-wizards.get(1).y))/CONST.FIELD_Ymax)//Util.getDistance(wizards.get(0), wizards.get(1))  //魔法使いの間は広いほど良い
                 + distToOpGoalReward[0]  //snaffleがゴールに近いほど良い
                 - distToMyGoalPenalty[0]
                 - AIParams.WIZ2SNAF_DIST_WEIGHT * sumDistWiz2Snaf[0]
                 + AIParams.OPWIZ2SNAF_DIST_WEIGHT * sumDistOpWiz2Snaf[0]
                 + AIParams.MAGIC_WEIGHT * myMagic;
-        //- AIParams.DENGER_SNAF_PENALTY * countDangerSnaffles[0];
+               //- AIParams.DENGER_SNAF_PENALTY * countDangerSnaffles[0];
     }
 
     void descScore() {
         final double[] distToOpGoalReward = {0}; //Weight * snaffle
         final double[] distToMyGoalPenalty = {0};
         this.snaffles.forEach((s) -> {
-            distToOpGoalReward[0] += Math.pow(AIParams.SNAF_DIST2OPGOAL_WEIGHT,
-                    (CONST.FIELD_MAX_DIST - Util.getDistance(s, Global.opGoal)) / CONST.FIELD_Xmax);
+            distToOpGoalReward[0]+= Math.pow(AIParams.SNAF_DIST2OPGOAL_WEIGHT,
+                    (CONST.FIELD_MAX_DIST-Util.getDistance(s,Global.opGoal))/CONST.FIELD_Xmax);
             distToMyGoalPenalty[0] += Math.pow(AIParams.SNAF_DIST2MYGOAL_WEIGHT,
-                    (CONST.FIELD_MAX_DIST - Util.getDistance(s, Global.myGoal)) / CONST.FIELD_Xmax);
+                    (CONST.FIELD_MAX_DIST-Util.getDistance(s,Global.myGoal))/CONST.FIELD_Xmax);
         });
 
         final double[] sumDistWiz2Snaf = {0};
@@ -559,15 +561,15 @@ class State implements Cloneable, Comparable {
         this.opWizards.forEach(sumDist2ClosestSnaf(sumDistOpWiz2Snaf));
 
         System.err.println("Pscore:" + AIParams.SCORE_WEIGHT * (myScore - opScore));
-        System.err.println("POpGoalReward:" + distToOpGoalReward[0]);
-        System.err.println("PMyGoalPenalty:" + distToMyGoalPenalty[0]);
-        System.err.println("PwizdistX:" + AIParams.WIZ_X_DIST_WEIGHT * Math.abs(wizards.get(0).x - wizards.get(1).x));//Util.getDistance(wizards.get(0), wizards.get(1)));
-        System.err.println("PwizdistXPow:" + Math.pow(AIParams.WIZ_X_DIST_POWW, (CONST.FIELD_Xmax - Math.abs(wizards.get(0).x - wizards.get(1).x)) / CONST.FIELD_Xmax));
+        System.err.println("POpGoalReward:"+distToOpGoalReward[0]);
+        System.err.println("PMyGoalPenalty:"+distToMyGoalPenalty[0]);
+        System.err.println("PwizdistX:" + AIParams.WIZ_X_DIST_WEIGHT * Math.abs(wizards.get(0).x-wizards.get(1).x));//Util.getDistance(wizards.get(0), wizards.get(1)));
+        System.err.println("PwizdistXPow:" + Math.pow(AIParams.WIZ_X_DIST_POWW,(CONST.FIELD_Xmax-Math.abs(wizards.get(0).x-wizards.get(1).x))/CONST.FIELD_Xmax));
         //System.err.println("PwizdistY:" + AIParams.WIZ_Y_DIST_WEIGHT * Math.abs(wizards.get(0).y-wizards.get(1).y));//Util.getDistance(wizards.get(0), wizards.get(1)));
-        System.err.println("PwizdistY:" + Math.pow(AIParams.WIZ_Y_DIST_POWW, (CONST.FIELD_Ymax - Math.abs(wizards.get(0).y - wizards.get(1).y)) / CONST.FIELD_Ymax));
+        System.err.println("PwizdistY:" + Math.pow(AIParams.WIZ_Y_DIST_POWW,(CONST.FIELD_Ymax-Math.abs(wizards.get(0).y-wizards.get(1).y))/CONST.FIELD_Ymax));
         System.err.println("Pwiz2snaf:" + AIParams.WIZ2SNAF_DIST_WEIGHT * sumDistWiz2Snaf[0]);
         System.err.println("Popwiz2snaf:" + AIParams.OPWIZ2SNAF_DIST_WEIGHT * sumDistOpWiz2Snaf[0]);
-        System.err.println("Pmagic:" + AIParams.MAGIC_WEIGHT * myMagic);
+        System.err.println("Pmagic:"+ AIParams.MAGIC_WEIGHT * myMagic);
     }
 
     private Consumer<Thing> sumDist2ClosestSnaf(double[] sumDistWiz2Snaf) {
@@ -759,12 +761,6 @@ class Thing implements Cloneable {
         }
     }
 
-    //１回の命令で2ターンすぎるので２回呼ぶ
-    public void move() {
-        moveOne();
-        moveOne();
-    }
-
     /**
      * movement of entities is computed as following
      * 1. Thrust
@@ -775,7 +771,7 @@ class Thing implements Cloneable {
      */
     //Thingではシミュレーションのうち3,4,5を担当する。1,2の加速処理はPlayerが担当する
     //x, vはdoubleだが加速時とこのメソッドないでしか小数部は出ない
-    private void moveOne() {
+    public void move() {
         //3, 5
         this.x = this.x + this.vx;
         this.y = this.y + this.vy;
@@ -792,7 +788,7 @@ class Thing implements Cloneable {
         this.y = Math.round(this.y);
         this.vx = Math.round(this.vx);
         this.vy = Math.round(this.vy);
-    }
+    } //addComment
 
     public void bound() {
         //Bound
@@ -857,6 +853,7 @@ class Thing implements Cloneable {
 }
 
 
+
 class Util {
     //-----幾何関係-----
     //AB to CD が交差してるか返す
@@ -876,10 +873,6 @@ class Util {
         return flag;*/
     }
 
-    static boolean isIntersect(Thing from1, Thing to1, Thing from2, Thing to2) {
-        return isIntersect(from1.x, from1.y, to1.x, to1.y, from2.x, from2.y, to2.x, to2.y);
-    }
-
     static boolean isIntersect(double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) {
         double ta = (cx - dx) * (ay - cy) + (cy - dy) * (cx - ax);
         double tb = (cx - dx) * (by - cy) + (cy - dy) * (cx - bx);
@@ -894,6 +887,7 @@ class Util {
 
         return flag;*/
     }
+
 
     //round half away from zero: ゼロから遠い方へ丸める
     //http://www.ftext.org/text/subsubsection/2365
@@ -915,24 +909,6 @@ class Util {
         return Math.sqrt(x * x + y * y);
     }
 
-    //http://marupeke296.com/COL_2D_No5_PolygonToCircle.html
-    static boolean checkCollision(Thing point, Thing vFrom, Thing vTo) {
-        double cos1 = Math.cos(getRadianAngle(point, vFrom));
-        double cos2 = Math.cos(getRadianAngle(point, vTo));
-        if ((cos1 < 0 && cos2 < 0) || (cos1 > 0 && cos2 > 0)) { //線分の直上に点はない
-            double dist1 = getDistance(point, vFrom);
-            double dist2 = getDistance(point, vTo);
-            if (Math.min(dist1, dist2) < point.r)
-                return true;
-        } else { //線分上
-            double dist = Math.abs(crossVector(point.x - vFrom.x, point.y - vFrom.y, vTo.x - vFrom.x, vTo.y - vFrom.y))
-                    / getDistance(vTo, vFrom);
-            if (dist <= point.r)
-                return true;
-        }
-        return false;
-    }
-
     //from to のベクトルとtargetの点との距離を測る
     static double getDistObj2line(long fromX, long fromY, long toX, long toY, long targetX, long targetY) {
         long v1x = toX - fromX;
@@ -940,17 +916,18 @@ class Util {
         long v2x = targetX - fromX;
         long v2y = targetY - fromY;
 
-        double d = Math.abs(crossVector(v1x, v1y, v2x, v2y));
+        long d = Math.abs(crossVector(v1x, v1y, v2x, v2y));
         double l = getDistance(fromX, fromY, toX, toY);
-        return d / l;
+        return (double) d / l;
     }
 
-    static double prodVector(double v1x, double v1y, double v2x, double v2y) {
+    //ベクトルの内積
+    static long prodVector(long v1x, long v1y, long v2x, long v2y) {
         return v1x * v2x + v1y * v2y;
     }
 
     //ベクトルの外積
-    static double crossVector(double v1x, double v1y, double v2x, double v2y) {
+    static long crossVector(long v1x, long v1y, long v2x, long v2y) {
         return v1x * v2y - v1y * v2x;
     }
 
@@ -981,9 +958,9 @@ class Util {
         Global.opGoalY = 3750;
 
         Global.myGoal = new Thing(Global.myGoalX, Global.myGoalY,
-                0.0, 0.0, 0, -1, "");
+                0.0,0.0, 0, -1,"" );
         Global.opGoal = new Thing(Global.opGoalX, Global.opGoalY,
-                0.0, 0.0, 0, -2, "");
+                0.0,0.0, 0, -2,"" );
     }
 
     /*static double getFriction(String entityType) {
@@ -1029,7 +1006,6 @@ class Util {
         return !(CONST.FIELD_Xmin < x && x < CONST.FIELD_Xmax &&
                 CONST.FIELD_Ymin < y && y < CONST.FIELD_Ymax);
     }
-
     static boolean outOfField(double x, double y) {
         return !(CONST.FIELD_Xmin < x && x < CONST.FIELD_Xmax &&
                 CONST.FIELD_Ymin < y && y < CONST.FIELD_Ymax);
@@ -1074,11 +1050,10 @@ class Util {
         return Math.min(basePower / (tmp * tmp), 1000);
     }
 
-    static boolean checkNext2TurnIsOut(Snaffle s) {
+    static boolean checkNext2TurnIsOut(Snaffle s){
         Snaffle tmp = s.clone();
-        tmp.move();
-        tmp.move();
-        return Util.outOfField(tmp.x, tmp.y);
+        tmp.move();tmp.move();tmp.move();tmp.move();
+        return Util.outOfField(tmp.x,tmp.y);
     }
 
 }
@@ -1150,7 +1125,7 @@ class CONST {
 
     static List<String> dummyCommand = new ArrayList<>();
 
-    static double FIELD_MAX_DIST = Util.getDistance(0, 0, CONST.FIELD_Xmax, CONST.FIELD_Ymax);
+    static double FIELD_MAX_DIST = Util.getDistance(0,0,CONST.FIELD_Xmax,CONST.FIELD_Ymax);
 
     static {
         dummyCommand.add("MOVE 7500 3500 150");
@@ -1176,17 +1151,17 @@ class AIParams {
     static int SCORE_WEIGHT = 500000;
     //x, yのときは0.2, 0.1 がいい感じだった
     static double WIZ_X_DIST_WEIGHT = 0.33;//0.33;//wiz間の距離に欠けるときは0.2がいい感じだった;
-    static double WIZ_Y_DIST_WEIGHT = 0.0;//0.15;//wiz間の距離に欠けるときは0.2がいい感じだった;
+    static double WIZ_Y_DIST_WEIGHT = 0.1;//0.15;//wiz間の距離に欠けるときは0.2がいい感じだった;
     static double SNAF_DIST2OPGOAL_WEIGHT = 75000;
     static double SNAF_DIST2MYGOAL_WEIGHT = 55000;
 
     static double WIZ_X_DIST_POWW = 350;
-    static double WIZ_Y_DIST_POWW = 0.0;
+    static double WIZ_Y_DIST_POWW = 250;
 
     static double OPWIZ_CLOSE_DIST = 800;
 
     static double WIZ2SNAF_DIST_WEIGHT = 0.5;
-    static double OPWIZ2SNAF_DIST_WEIGHT = 0.5;// 0.2
+    static double OPWIZ2SNAF_DIST_WEIGHT = 0.6;// 0.2
 
     static double MAGIC_WEIGHT = 225;
 
@@ -1194,10 +1169,7 @@ class AIParams {
     static double DENGER_SNAF_PENALTY = 5000;
 
     static double FLIP_DIST_MAX = 4000;
-    static double FLIP_DIST_MIN = CONST.WIZ_R + 20;
-
-    static double ACCIO_DIST_MAX = 3700;
-    static double ACCIO_DIST_MIN = CONST.WIZ_R + 20;
+    static double ACCIO_DIST_MAX = 3000;
 
     static double PETRIF_RANGE_X = 6500;
     static double PETRIF_SPEED = 1200; //投げたときの最大速度が500/0.5=1000
