@@ -1,4 +1,5 @@
-import javax.sound.sampled.Port;
+import org.jetbrains.annotations.NotNull;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -46,26 +47,26 @@ class Player {
                 switch (unitType) {
                     case 0: //reaper
                         Reaper r = new Reaper(unitId, null, x, y, radius);
-                        if(player==0){
+                        if (player == 0) {
                             myReaper = r;
-                        }else if(player ==-1){
+                        } else if (player == -1) {
 
-                        }else{
+                        } else {
                             opReapers.add(r);
                         }
                         break;
                     case 1: //Destroyer
                         Destroyer d = new Destroyer(unitId, null, x, y, radius);
-                        if(player==0){
+                        if (player == 0) {
                             myDestroyer = d;
-                        }else if(player == -1){
+                        } else if (player == -1) {
 
-                        }else{
+                        } else {
                             opDestroyers.add(d);
                         }
                         break;
                     case 3: //Tanker
-                        Tanker t = new Tanker( unitId, x, y, null, radius);
+                        Tanker t = new Tanker(unitId, x, y, null, radius);
                         tankers.add(t);
                         break;
                     case 4: //wreck
@@ -74,11 +75,11 @@ class Player {
                         break;
                 }
             }
-            System.err.println(String.format("nW, nT: %s %s",wrecks.size(), tankers.size() ) );
+            System.err.println(String.format("nW, nT: %s %s", wrecks.size(), tankers.size()));
             String moveR = moveReaper(myReaper, wrecks, tankers);
             String moveD = moveDestroyer(myDestroyer, myReaper, tankers);
-            System.out.println(moveR + " "+moveR);
-            System.out.println(moveD + " "+moveD);
+            System.out.println(moveR + " " + moveR);
+            System.out.println(moveD + " " + moveD);
             System.out.println("WAIT");
         }
     }
@@ -96,10 +97,10 @@ class Player {
         return res;
     }
 
-    static <T extends Point> T getInFieldClosest(Reaper r, List<T> points, double rangeFromCenter){
+    static <T extends Point> T getInFieldClosest(Reaper r, List<T> points, double rangeFromCenter) {
         List<T> res = new ArrayList<>();
-        for(T p : points){
-            if(Util.getDistance(p, CONST.WATERTOWN)< rangeFromCenter)
+        for (T p : points) {
+            if (Util.getDistance(p, CONST.CENTER) < rangeFromCenter)
                 res.add(p);
         }
         return getClosest(r, res);
@@ -110,8 +111,8 @@ class Player {
         Wreck w = getClosest(r, wrecks);
         Tanker t = getInFieldClosest(r, tankers, 6500);
 
-        if(w==null) {
-            if(t ==null){
+        if (w == null) {
+            if (t == null) {
                 return "WAIT";
             }
             return Util.getOutput(t.x, t.y,
@@ -120,8 +121,8 @@ class Player {
 
         double dist = Util.getDistance(r, w);
 
-        if(w.water > 1) {
-            return Util.getOutput( w.x,  w.y,
+        if (w.water > 1) {
+            return Util.getOutput(w.x, w.y,
                     Util.getRanged(dist / 3500 * 300, 100, 200));
         }
 
@@ -130,58 +131,148 @@ class Player {
             System.err.println(String.format("wreck x y rad/ %s %s %s %s", (int)w.x, (int)w.y, w.radius, dist));
             return "WAIT";
         }*/
-        System.err.println(String.format("target: %s %s",w.radius, w.water ) );
-        return Util.getOutput( w.x,  w.y,
-             Util.getRanged(dist / 3500 * 300, 100, 200));
+        System.err.println(String.format("target: %s %s", w.radius, w.water));
+        return Util.getOutput(w.x, w.y,
+                Util.getRanged(dist / 3500 * 300, 100, 200));
     }
 
-    static String moveDestroyer(Destroyer d, Reaper r, List<Tanker> tankers){
+    static String moveDestroyer(Destroyer d, Reaper r, List<Tanker> tankers) {
 
         Tanker t = getInFieldClosest(r, tankers, 7000);
-        if(t==null) {
+        if (t == null) {
             double dist = Util.getDistance(d, r);
-            return Util.getOutput( r.x,  r.y,300);
-                    //Util.getRanged(dist/ 300 * 300, 50, 300));
+            return Util.getOutput(r.x, r.y, 300);
+            //Util.getRanged(dist/ 300 * 300, 50, 300));
         }
         double dist = Util.getDistance(r, t);
-        return Util.getOutput( t.x,  t.y,300);
-                     //Util.getRanged(dist / 2000 * 300, 100, 300));
+        return Util.getOutput(t.x, t.y, 300);
+        //Util.getRanged(dist / 2000 * 300, 100, 300));
     }
 
-    static List<String> solve() {
-        return null;
+    static List<String> solve(long startTime, State startState, Evaluator evaluator) {
+
+        long currentTime = System.currentTimeMillis();
+        startState.setScore();
+        State bestState = startState.clone();
+
+        TreeSet<State> beam1 = new TreeSet<>();
+        TreeSet<State> beam2 = new TreeSet<>();
+        beam1.add(startState.clone());
+        //System.err.println("beam1:" + beam1.first().toString());
+        int turnsSimulated = 0;
+        while (currentTime < (startTime + AIParams.SEARCH_DURATION)) {  //何を答えとするか？ => 読める中で一番良い盤面になる状態に繊維する
+
+            State now = beam1.pollFirst();
+
+            if (now == null) break;
+
+            bestState = updateQueue(now, bestState, beam2, currentTime, startTime + AIParams.SEARCH_DURATION);
+            //System.err.println("beam2Count:"+beam2.size());
+            if (beam1.isEmpty()) {
+                beam1 = beam2;
+                beam2 = new TreeSet<>();
+            }
+            turnsSimulated++;
+            currentTime = System.currentTimeMillis();
+        }
+
+        /*if(!beam2.isEmpty()) {
+            showScores(beam2, 30);
+        }else
+            showScores(beam1,30);*/
+        //assert !bestState.equals(startState);
+        System.err.println("simulated turn: " + turnsSimulated);
+        System.err.println("bestState: " + bestState.score + " " + bestState.firstCommand);
+        bestState.descScore();
+
+        if (bestState.firstCommand.get(0).equals("") || bestState.firstCommand.get(1).equals("")) {
+            bestState.firstCommand = CONST.dummyCommand;
+            System.err.println("command invalid");
+        }
+        return bestState.firstCommand;
     }
 }
 
 /**
  * 状態
  */
-class State {
+class State implements Comparable {
     int myScore;
     int enemyScore1;
     int enemyScore2;
     int myRage;
     int enemyRage1;
     int enemyRage2;
+
     double stateScore;
 
     Reaper myReaper;
+    Destroyer myDestroyer;
     List<Reaper> opReapers;
+    List<Destroyer> opDestroyers;
     List<Wreck> wrecks;
-    final List<String> commands = null;
+    List<Tanker> tankers;
+    List<String> commands;
 
-    public State(Reaper myReaper, List<Reaper> opReapers,
-                 List<Wreck> wrecks) {
+    public State(Reaper myReaper,
+                 Destroyer myDestroyer,
+                 List<Reaper> opReapers,
+                 List<Destroyer> opDestroyers,
+                 List<Wreck> wrecks,
+                 List<Tanker> tankers,
+                 List<String> commands) {
         this.myReaper = myReaper;
+        this.myDestroyer = myDestroyer;
         this.opReapers = opReapers;
+        this.opDestroyers = opDestroyers;
         this.wrecks = wrecks;
+        this.tankers = tankers;
+        this.commands = commands;
+    }
+
+    /**
+     * https://vyazelenko.com/2013/10/30/clone-vs-copy-constructor-a-closer-look/
+     * https://vyazelenko.com/2013/10/29/copy-object-in-java-performance-comparison/
+     *
+     * @return
+     */
+    @Override
+    protected State clone() {
+        try {
+            State tmp = (State) super.clone(); //Object型以外のdeep copyを行う
+            tmp.myReaper = this.myReaper.clone();
+            tmp.myDestroyer = this.myDestroyer.clone();
+            tmp.opReapers = this.opReapers.stream()
+                    .map(Reaper::clone)
+                    .collect(Collectors.toList());
+            tmp.opDestroyers = this.opDestroyers.stream()
+                    .map(Destroyer::clone)
+                    .collect(Collectors.toList());
+            tmp.wrecks = this.wrecks.stream()
+                    .map(Wreck::clone)
+                    .collect(Collectors.toList());
+            tmp.tankers = this.tankers.stream()
+                    .map(Tanker::clone)
+                    .collect(Collectors.toList());
+            tmp.commands = new ArrayList<>(this.commands); //stringはimmutable
+
+            return tmp;
+        } catch (CloneNotSupportedException e) {
+            System.err.println(e.getMessage());
+            throw new RuntimeException();
+        }
+    }
+
+    @Override
+    public int compareTo(@NotNull Object o) {
+        return 0;
     }
 }
 
 /**
  * 位置
  */
-class Point {
+class Point implements Cloneable {
     double x;
     double y;
 
@@ -242,6 +333,15 @@ class Point {
         if (Double.doubleToLongBits(y) != Double.doubleToLongBits(other.y)) return false;
         return true;
     }
+
+    @Override
+    protected Point clone() {
+        try {
+            return (Point) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }
 
 /**
@@ -271,6 +371,11 @@ class Wreck extends Point {
         });
 
         return water > 0;
+    }
+
+    @Override
+    protected Wreck clone() {
+        return (Wreck) super.clone();
     }
 }
 
@@ -365,7 +470,7 @@ abstract class Unit extends Point {
     // Search the next collision with the map border
     Collision getCollision() {
         // Check instant collision
-        if (distance(CONST.WATERTOWN) + radius >= CONST.MAP_RADIUS) {
+        if (distance(CONST.CENTER) + radius >= CONST.MAP_RADIUS) {
             return new Collision(0.0, this);
         }
 
@@ -524,23 +629,16 @@ abstract class Unit extends Point {
         vx -= fx * mcoeff;
         vy -= fy * mcoeff;
 
-        double diff = distance(CONST.WATERTOWN) + radius - CONST.MAP_RADIUS;
+        double diff = distance(CONST.CENTER) + radius - CONST.MAP_RADIUS;
         if (diff >= 0.0) {
             // Unit still outside of the map, reposition it
-            moveTo(CONST.WATERTOWN, diff + CONST.EPSILON);
+            moveTo(CONST.CENTER, diff + CONST.EPSILON);
         }
     }
 
-    public int getExtraInput() {
-        return -1;
-    }
-
-    public int getExtraInput2() {
-        return -1;
-    }
-
-    public int getPlayerIndex() {
-        return -1;
+    @Override
+    protected Unit clone() {
+        return (Unit) super.clone();
     }
 }
 
@@ -556,8 +654,6 @@ class Tanker extends Unit {
     Tanker(int unitId, int x, int y, InnerPlayer innerPlayer, double radius) {
         super(CONST.TYPE_TANKER, unitId, x, y, radius);
 
-        this.innerPlayer = innerPlayer;
-
         water = CONST.TANKER_EMPTY_WATER;
         mass = CONST.TANKER_EMPTY_MASS + CONST.TANKER_MASS_BY_WATER * water;
         friction = CONST.TANKER_FRICTION;
@@ -566,7 +662,7 @@ class Tanker extends Unit {
 
     /*Wreck die() {
         // Don't spawn a wreck if our center is outside of the map
-        if (distance(CONST.WATERTOWN) >= CONST.MAP_RADIUS) {
+        if (distance(CONST.CENTER) >= CONST.MAP_RADIUS) {
             return null;
         }
 
@@ -580,10 +676,10 @@ class Tanker extends Unit {
     void play() {
         if (isFull()) {
             // Try to leave the map
-            thrust(CONST.WATERTOWN, -CONST.TANKER_THRUST);
-        } else if (distance(CONST.WATERTOWN) > CONST.WATERTOWN_RADIUS) {
+            thrust(CONST.CENTER, -CONST.TANKER_THRUST);
+        } else if (distance(CONST.CENTER) > CONST.WATERTOWN_RADIUS) {
             // Try to reach watertown
-            thrust(CONST.WATERTOWN, CONST.TANKER_THRUST);
+            thrust(CONST.CENTER, CONST.TANKER_THRUST);
         }
     }*/
 
@@ -599,6 +695,10 @@ class Tanker extends Unit {
     public int getExtraInput2() {
         return size;
     }*/
+    @Override
+    protected Tanker clone() {
+        return (Tanker) super.clone();
+    }
 }
 
 class SkillResult {
@@ -722,6 +822,10 @@ class Reaper extends Looter {
     SkillEffect skillImpl(Point p) {
         return new ReaperSkillEffect(CONST.TYPE_REAPER_SKILL_EFFECT, p.x, p.y, CONST.REAPER_SKILL_RADIUS, CONST.REAPER_SKILL_DURATION, CONST.REAPER_SKILL_ORDER, this);
     }
+
+    protected Reaper clone() {
+        return (Reaper) super.clone();
+    }
 }
 
 class Destroyer extends Looter {
@@ -744,6 +848,11 @@ class Destroyer extends Looter {
                 CONST.DESTROYER_SKILL_ORDER,
                 this);
     }
+
+    @Override
+    protected Destroyer clone() {
+        return (Destroyer) super.clone();
+    }
 }
 
 class Doof extends Looter {
@@ -764,6 +873,11 @@ class Doof extends Looter {
     // With flame effects! Yeah!
     int sing() {
         return (int) Math.floor(speed() * CONST.DOOF_RAGE_COEF);
+    }
+
+    @Override
+    protected Doof clone() {
+        return (Doof) super.clone();
     }
 }
 
@@ -920,19 +1034,27 @@ class Util {
     }
 
     static double getRanged(double val, int min, int max) {
-        return getRanged( (int)val, min, max);
+        return getRanged((int) val, min, max);
     }
 
-    static String getOutput(double x, double y, double thrust){
-        return getOutput((int)x, (int)y, (int)thrust);
+    static String getOutput(double x, double y, double thrust) {
+        return getOutput((int) x, (int) y, (int) thrust);
     }
 
-    static String getOutput(int x, int y, int thrust){
+    static String getOutput(int x, int y, int thrust) {
         return String.format("%s %s %s", x, y, thrust);
     }
+
+}
+
+class AIParam {
+    static int SCORE = 100;
+    static int RMyDist2Wreck = 10000;
+    //static int POpDist2Wreck
 }
 
 class CONST {
+
     static boolean SPAWN_WRECK = false;
     static int LOOTER_COUNT = 3;
     static boolean REAPER_SKILL_ACTIVE = true;
@@ -940,9 +1062,6 @@ class CONST {
     static boolean DOOF_SKILL_ACTIVE = true;
 
     static double MAP_RADIUS = 6000.0;
-    static int TANKERS_BY_PLAYER;
-    static int TANKERS_BY_PLAYER_MIN = 1;
-    static int TANKERS_BY_PLAYER_MAX = 3;
 
     static double WATERTOWN_RADIUS = 3000.0;
 
@@ -950,13 +1069,7 @@ class CONST {
     static double TANKER_EMPTY_MASS = 2.5;
     static double TANKER_MASS_BY_WATER = 0.5;
     static double TANKER_FRICTION = 0.40;
-    static double TANKER_RADIUS_BASE = 400.0;
-    static double TANKER_RADIUS_BY_SIZE = 50.0;
     static int TANKER_EMPTY_WATER = 1;
-    static int TANKER_MIN_SIZE = 4;
-    static int TANKER_MAX_SIZE = 10;
-    static double TANKER_MIN_RADIUS = TANKER_RADIUS_BASE + TANKER_RADIUS_BY_SIZE * TANKER_MIN_SIZE;
-    static double TANKER_MAX_RADIUS = TANKER_RADIUS_BASE + TANKER_RADIUS_BY_SIZE * TANKER_MAX_SIZE;
     static double TANKER_SPAWN_RADIUS = 8000.0;
     static int TANKER_START_THRUST = 2000;
 
@@ -1006,12 +1119,61 @@ class CONST {
     static double MIN_IMPULSE = 30.0;
     static double IMPULSE_COEFF = 0.5;
 
-    // Global first free unitId for all elements on the map
-    static int GLOBAL_ID = 0;
-
     // Center of the map
-    final static Point WATERTOWN = new Point(0, 0);
+    static final Point CENTER = new Point(0, 0);
 
     // The null collision
-    final static Collision NULL_COLLISION = new Collision(1.0 + EPSILON);
+    static final Collision NULL_COLLISION = new Collision(1.0 + EPSILON);
+
+    static int MOVE_R = 600;
+    static Integer[] target_X;
+    static Integer[] target_Y;
+    static int DIR_NUM = 12;
+
+    static Integer[] ACCE = {50, 100, 200, 300};
+
+    static {
+        int diffDeg = 360 / DIR_NUM;
+        List<Integer> x = new ArrayList<>();
+        List<Integer> y = new ArrayList<>();
+        for (int i = 0; i < 360; i += diffDeg) {
+            x.add((int)Math.round(MOVE_R * Math.cos(Math.toRadians(i))));
+            y.add((int)Math.round(MOVE_R * Math.sin(Math.toRadians(i))));
+        }
+        target_X = x.toArray(new Integer[0]);
+        target_Y = y.toArray(new Integer[0]);
+    }
+
+
+}
+
+class MyEvalator implements Evaluator {
+    @Override
+    public double eval(State s) {
+        final double[] rDist2Wrecks={0}; //自分のreaperがWreckに近い報酬
+        final double[] rDist2Tankers={0}; //自分のreaperがTankerに近い報酬
+
+        //final double[] pDistToWrecks={0}; //相手のreaperがWreckに近い報酬
+        //final double[] pDistToTankers={0}; //相手のreaperがTankerに近い報酬
+
+        s.wrecks.forEach(w -> {
+            rDist2Wrecks[0] += (Math.pow(AIParam.RMyDist2Wreck,
+                    (CONST.MAP_RADIUS - Util.getDistance(s.myReaper, w))/CONST.MAP_RADIUS))* w.water;
+            //pDistToWrecks[0] +=
+        });
+
+        s.tankers.forEach(t -> {
+            rDist2Tankers[0] += ()
+        });
+
+        int opScore_higher = s.enemyScore1 > s.enemyScore2 ?
+                                s.enemyScore1 : s.enemyScore2;
+        int rpScore = (s.myScore - opScore_higher) * AIParam.SCORE;
+
+        return ;
+    }
+}
+
+interface Evaluator {
+    double eval(State s);
 }

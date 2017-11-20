@@ -10,4 +10,5 @@ public class UtilTest {
         double res= Util.getDistance(a,b);
         assertEquals(res, 2521.30839, 1);
     }
+
 }
