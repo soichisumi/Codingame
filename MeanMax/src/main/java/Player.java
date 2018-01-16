@@ -75,11 +75,12 @@ class Player {
                         break;
                 }
             }
-            System.err.println(String.format("nW, nT: %s %s", wrecks.size(), tankers.size()));
-            String moveR = moveReaper(myReaper, wrecks, tankers);
-            String moveD = moveDestroyer(myDestroyer, myReaper, tankers);
-            System.out.println(moveR + " " + moveR);
-            System.out.println(moveD + " " + moveD);
+
+//            System.err.println(String.format("nW, nT: %s %s", wrecks.size(), tankers.size()));
+//            String moveR = moveReaper(myReaper, wrecks, tankers);
+//            String moveD = moveDestroyer(myDestroyer, myReaper, tankers);
+//            System.out.println(moveR + " " + moveR);
+//            System.out.println(moveD + " " + moveD);
             System.out.println("WAIT");
         }
     }
@@ -152,7 +153,7 @@ class Player {
     static List<String> solve(long startTime, State startState, Evaluator evaluator) {
 
         long currentTime = System.currentTimeMillis();
-        startState.setScore();
+        startState.stateScore = evaluator.eval(startState);
         State bestState = startState.clone();
 
         TreeSet<State> beam1 = new TreeSet<>();
@@ -160,7 +161,7 @@ class Player {
         beam1.add(startState.clone());
         //System.err.println("beam1:" + beam1.first().toString());
         int turnsSimulated = 0;
-        while (currentTime < (startTime + AIParams.SEARCH_DURATION)) {  //何を答えとするか？ => 読める中で一番良い盤面になる状態に繊維する
+        while (currentTime < (startTime + AIParam.SEARCH_MSEC)) {  //何を答えとするか？ => 読める中で一番良い盤面になる状態に繊維する
 
             State now = beam1.pollFirst();
 
@@ -176,25 +177,234 @@ class Player {
             currentTime = System.currentTimeMillis();
         }
 
-        /*if(!beam2.isEmpty()) {
-            showScores(beam2, 30);
-        }else
-            showScores(beam1,30);*/
-        //assert !bestState.equals(startState);
         System.err.println("simulated turn: " + turnsSimulated);
-        System.err.println("bestState: " + bestState.score + " " + bestState.firstCommand);
-        bestState.descScore();
+        //System.err.println("bestState: " + bestState.score + " " + bestState.firstCommand);
 
-        if (bestState.firstCommand.get(0).equals("") || bestState.firstCommand.get(1).equals("")) {
-            bestState.firstCommand = CONST.dummyCommand;
-            System.err.println("command invalid");
-        }
         return bestState.firstCommand;
+    }
+
+    static State updateQueue(State now, State bestState, TreeSet<State> queue, long limitTime) {
+
+        //全方向移動・投球　または　魔法
+        for (int dir0 = 0; dir0 <= CONST.RADIANS.length; dir0++) { //i==lenで使えるなら魔法を使う。snaffleを持っているなら必ず投げる
+            for (int dir1 = 0; dir1 <= CONST.RADIANS.length; dir1++) {
+
+            }
+
+            if (System.currentTimeMillis() > limitTime)
+                break;
+        }
+        //System.err.println("size of new state:" + newStates.size());
+        for (State s : newStates) {
+            simulateTurnAndEvaluate(s);
+            bestState = updateStates(s, bestState, queue);
+        }
+
+        //System.err.println("fScore:"+queue.first().score);
+        //System.err.println("lScore:"+queue.last().score);
+        return bestState;
+    }
+
+    //update treeset and return state having best score
+    private static State updateStates(State newState, State bestState, TreeSet<State> nextStates) {
+        nextStates.add(newState);
+
+        if (nextStates.size() > AIParams.BEAM_WIDTH)
+            nextStates.pollLast();
+
+        return getBestState(newState, bestState);
+    }
+
+
+    // 移動するパターンの場合(dir != CONST.RADIANS.len)、目的座標を計算して次の速度を設定する
+    // return: true if cannot use destination
+    private static boolean updateStateForMoveAndThrow(int direction, int wizNum, State tmp/*,
+                                                      Thing closestSnaf, Thing closestOpWiz*/) {
+        //if(direction == CONST.RADIANS.length) return false;
+
+        Wizard targetWiz = tmp.wizards.get(wizNum);
+        int destX = (int) targetWiz.x + Util.getMoveTargetDiffX(CONST.RADIANS[direction]);
+        int destY = (int) targetWiz.y + Util.getMoveTargetDiffY(CONST.RADIANS[direction]);
+
+        if (!Util.inField(destX, destY)) {
+            //System.err.println("break dest x:" + destX + " y:" + destY);
+            return true;
+        }
+
+        if (targetWiz.state == 0) { //snaffleを持っていなければ移動
+            targetWiz.vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(CONST.RADIANS[direction]);
+            targetWiz.vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(CONST.RADIANS[direction]);
+
+            if (tmp.firstCommand.get(wizNum).equals(""))
+                tmp.firstCommand.set(wizNum, "MOVE " + destX + " " + destY + " " + CONST.WIZ_THRUST);
+
+        } else {
+            Snaffle throwTarget = (Snaffle) Util.getClosestThing(targetWiz, tmp.snaffles);
+
+            if (throwTarget == null) return false;
+
+            throwTarget.vx += CONST.THROW_POWER / CONST.SNAF_M * Math.cos(CONST.RADIANS[direction]);
+            throwTarget.vy += CONST.THROW_POWER / CONST.SNAF_M * Math.sin(CONST.RADIANS[direction]);
+            if (tmp.firstCommand.get(wizNum).equals(""))
+                tmp.firstCommand.set(wizNum, "THROW " + destX + " " + destY + " " + CONST.THROW_POWER);
+        }
+        return false;
+    }
+
+    //spellName: FLIPENDO or ACCIO, wizardId: 0 or 1
+    private static void updateStateForSpellAndAddStateList(List<State> newStates, State baseState, String spellName, int spellCost, double spellPower, int myMagic, int wizNum) {
+        if (spellCost < myMagic) {
+            for (int i = 0; i < baseState.snaffles.size(); i++) { //Flipendoを打つのはsnaffleに対してのみ
+                State tmp = baseState.clone();
+                Snaffle tmpTargetSnaf = baseState.snaffles.get(i);
+                Wizard targetWiz = tmp.wizards.get(wizNum);
+
+                //accioなら180度回転
+                double angle = spellName.equals("FLIPENDO") ? Util.getRadianAngle(targetWiz, tmpTargetSnaf)
+                        : Util.getRadianAngle(tmpTargetSnaf, targetWiz);
+                double deg = Math.toDegrees(angle);
+
+                //効果ある方向に打つか
+                if (-90 <= deg && deg <= 90) {
+                    if (Global.myTeamId == 1)
+                        continue;
+                } else {
+                    if (Global.myTeamId == 0)
+                        continue;
+                }
+
+                double dist = Util.getDistance(targetWiz, tmpTargetSnaf);
+                double acc = Util.getSpellAcc(dist, spellPower);
+
+                if (Util.checkNext2TurnIsOut(tmp.snaffles.get(i)))
+                    continue;
+
+                //ACCIOなら遠すぎないかチェック
+                if (spellName.equals("ACCIO") && (dist > AIParams.ACCIO_DIST_MAX || dist < AIParams.ACCIO_DIST_MIN))
+                    continue;
+
+                //FLIPENDOなら10ターン後に入るかチェック
+                if (spellName.equals("FLIPENDO") &&
+                        (dist > AIParams.FLIP_DIST_MAX || !willPassGoal(tmpTargetSnaf, acc, angle) || dist < AIParams.FLIP_DIST_MIN))
+                    continue;
+
+                tmp.snaffles.get(i).vx += acc / CONST.SNAF_M * Math.cos(angle);
+                tmp.snaffles.get(i).vy += acc / CONST.SNAF_M * Math.sin(angle);
+
+                tmp.myMagic -= spellCost;
+                if (tmp.firstCommand.get(wizNum).equals(""))
+                    tmp.firstCommand.set(wizNum, spellName + " " + tmp.snaffles.get(i).entityId);
+                //assert !tmp.firstCommand.get(0).equals("") && !tmp.firstCommand.get(1).equals("");
+                newStates.add(tmp);
+            }
+        }
+    }
+
+    private static boolean willPassGoal(Snaffle snaf, double acc, double ang) {
+        Snaffle tmp = snaf.clone();
+        tmp.vx += acc / CONST.SNAF_M * Math.cos(ang);
+        tmp.vy += acc / CONST.SNAF_M * Math.sin(ang);
+        for (int i = 0; i < AIParams.FLIPENDO_LOOP; i++)
+            tmp.move();
+
+        return Util.isIntersect(Global.opGoalX, CONST.POLL_LOWER + AIParams.FLIP_PASS_GOAL_BUFFER,
+                Global.opGoalX, CONST.POLL_UPPER - AIParams.FLIP_PASS_GOAL_BUFFER,
+                snaf.x, snaf.y,
+                tmp.x, tmp.y);
+    }
+
+    private static void updateStateForPetAndAddStateList(List<State> newStates, State baseState, int myMagic, int wizNum) {
+        if (CONST.cPetrificus < myMagic &&
+                (Global.lastCastTurn + AIParams.RECAST_TURN) < Global.turnCount) {
+            for (int i = 0; i < baseState.snaffles.size(); i++) {
+                if (Util.getSpeed(baseState.snaffles.get(i)) < AIParams.PETRIF_SPEED)
+                    continue;
+//                if (Math.abs(baseState.snaffles.get(i).x - (double) Global.myGoalX) > AIParams.PETRIF_RANGE_X)
+//                    continue;
+                if (Util.checkNext2TurnIsOut(baseState.snaffles.get(i)))
+                    continue;
+
+                State tmp = baseState.clone();
+                Snaffle targetSnaf = baseState.snaffles.get(i);
+
+                tmp.snaffles.get(i).vx = 0;
+                tmp.snaffles.get(i).vy = 0;
+                tmp.myMagic -= CONST.cPetrificus;
+                if (tmp.firstCommand.get(wizNum).equals(""))
+                    tmp.firstCommand.set(wizNum, "PETRIFICUS " + targetSnaf.entityId);
+                newStates.add(tmp);
+            }
+        }
+    }
+
+    static void simulateTurnAndEvaluate(State s) {
+        State before = s.clone();
+
+        addCommandToOpWizards(s);
+
+        s.turnCount++;
+        s.generation++;
+
+        s.wizards.forEach(Wizard::move);
+        s.opWizards.forEach(Thing::move);
+        s.snaffles.forEach(Snaffle::move);
+        s.bludgers.forEach(Thing::move);
+
+        checkWizardGetSnaffle(before, s);
+        s.snaffles.removeIf((snaf) -> {
+            if (snaf.x < CONST.FIELD_Xmin) {
+                if (Global.myTeamId == 0) {
+                    s.opScore++;
+                } else {
+                    s.myScore++;
+                }
+                return true;
+            } else if (snaf.x > CONST.FIELD_Xmax) {
+                if (Global.myTeamId == 0) {
+                    s.myScore++;
+                } else {
+                    s.opScore++;
+                }
+                return true;
+            }
+            return false;
+        });
+        s.setScore();
+    }
+
+    //最も近いsnaffleに近づくか、ゴールに向かって投げる
+    static void addCommandToOpWizards(State s) {
+        if (s.snaffles.size() == 0)
+            return;
+
+        for (Thing opWiz : s.opWizards) {
+            if (opWiz.state == 0) {
+                Thing closest = null;
+                double minDist = Double.MAX_VALUE;
+                for (Thing snaf : s.snaffles) {
+                    double dist = Util.getDistance(opWiz, snaf);
+                    if (minDist > dist) {
+                        closest = snaf;
+                        minDist = dist;
+                    }
+                }
+                double rad = Util.getRadianAngle(opWiz, closest);
+                opWiz.vx += CONST.WIZ_THRUST / CONST.WIZ_M * Math.cos(rad);
+                opWiz.vy += CONST.WIZ_THRUST / CONST.WIZ_M * Math.sin(rad);
+
+            } else {
+                Snaffle snaf = (Snaffle) Util.getClosestThing(opWiz, s.snaffles);
+                double rad = Util.getRadianAngle(snaf, Global.myGoal);
+                snaf.vx = CONST.THROW_POWER / CONST.SNAF_M * Math.cos(rad);
+                snaf.vy = CONST.THROW_POWER / CONST.SNAF_M * Math.sin(rad);
+            }
+        }
     }
 }
 
 /**
  * 状態
+ * TODO: Stateが作られるタイミングで移動とスコアリングを終えるようにする
  */
 class State implements Comparable {
     int myScore;
@@ -1048,9 +1258,11 @@ class Util {
 }
 
 class AIParam {
-    static int SCORE = 100;
-    static int RMyDist2Wreck = 10000;
+    static int SCORE = 100000;
+    static int RDist2Wreck = 1000;
     //static int POpDist2Wreck
+    static int RDist2Tanker = 100;
+    static int SEARCH_MSEC = 50;
 }
 
 class CONST {
@@ -1147,7 +1359,7 @@ class CONST {
 
 }
 
-class MyEvalator implements Evaluator {
+class SimpleEvaluator implements Evaluator {
     @Override
     public double eval(State s) {
         final double[] rDist2Wrecks={0}; //自分のreaperがWreckに近い報酬
@@ -1157,20 +1369,20 @@ class MyEvalator implements Evaluator {
         //final double[] pDistToTankers={0}; //相手のreaperがTankerに近い報酬
 
         s.wrecks.forEach(w -> {
-            rDist2Wrecks[0] += (Math.pow(AIParam.RMyDist2Wreck,
+            rDist2Wrecks[0] += (Math.pow(AIParam.RDist2Wreck,
                     (CONST.MAP_RADIUS - Util.getDistance(s.myReaper, w))/CONST.MAP_RADIUS))* w.water;
             //pDistToWrecks[0] +=
         });
 
         s.tankers.forEach(t -> {
-            rDist2Tankers[0] += ()
+            rDist2Tankers[0] += (Math.pow(AIParam.RDist2Tanker,
+                    (CONST.MAP_RADIUS = Util.getDistance(s.myDestroyer, t))/CONST.MAP_RADIUS)) * t.water;
         });
 
         int opScore_higher = s.enemyScore1 > s.enemyScore2 ?
                                 s.enemyScore1 : s.enemyScore2;
         int rpScore = (s.myScore - opScore_higher) * AIParam.SCORE;
-
-        return ;
+        return rpScore + rDist2Wrecks[0] + rDist2Tankers[0];
     }
 }
 
